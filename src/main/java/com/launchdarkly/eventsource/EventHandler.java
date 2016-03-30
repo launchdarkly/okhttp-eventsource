@@ -1,4 +1,4 @@
-package com.launchdarkly.sse;
+package com.launchdarkly.eventsource;
 
 public interface EventHandler {
   void onOpen() throws Exception;

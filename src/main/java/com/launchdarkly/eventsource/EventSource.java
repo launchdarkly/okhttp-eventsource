@@ -1,10 +1,12 @@
-package com.launchdarkly.sse;
+package com.launchdarkly.eventsource;
 
-import okhttp3.*;
+import okhttp3.Headers;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 import okio.BufferedSource;
 import okio.Okio;
 
-import java.io.IOException;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
@@ -151,6 +153,7 @@ public class EventSource implements ConnectionHandler
     }
   }
 
+  /*
   public static void main(String... args) {
     EventHandler handler = new EventHandler() {
       public void onOpen() throws Exception {
@@ -168,14 +171,7 @@ public class EventSource implements ConnectionHandler
     };
     EventSource source = new Builder(handler, URI.create("http://localhost:8080/events/")).build();
     source.start();
-    /*
-    try {
-      Thread.sleep(200000);
-    } catch (InterruptedException e) {
-      e.printStackTrace();
-    }
-    */
-    System.out.println("exiting");
   }
+  */
 
 }

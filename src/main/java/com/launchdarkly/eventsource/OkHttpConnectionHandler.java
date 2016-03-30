@@ -1,4 +1,4 @@
-package com.launchdarkly.sse;
+package com.launchdarkly.eventsource;
 
 public class OkHttpConnectionHandler implements ConnectionHandler {
 

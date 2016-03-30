@@ -1,4 +1,4 @@
-package com.launchdarkly.sse;
+package com.launchdarkly.eventsource;
 
 interface ConnectionHandler {
   void setReconnectionTimeMs(long reconnectionTimeMs);

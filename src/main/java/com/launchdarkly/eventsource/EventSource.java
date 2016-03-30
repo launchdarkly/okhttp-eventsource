@@ -10,8 +10,7 @@ import okio.Okio;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class EventSource implements ConnectionHandler
@@ -27,6 +26,7 @@ public class EventSource implements ConnectionHandler
   private final ExecutorService executor;
   private volatile long reconnectTimeMs;
   private volatile String lastEventId;
+  private volatile Future<?> connectionTask;
   private final EventHandler handler;
   private AtomicInteger readyState;
   private final OkHttpClient client;
@@ -35,25 +35,32 @@ public class EventSource implements ConnectionHandler
     this.uri = builder.uri;
     this.headers = addDefaultHeaders(builder.headers);
     this.reconnectTimeMs = builder.reconnectTimeMs;
-    this.handler = new AsyncEventHandler(builder.executor, builder.handler);
+    this.executor = Executors.newCachedThreadPool();
+    this.handler = new AsyncEventHandler(this.executor, builder.handler);
     this.readyState = new AtomicInteger(CLOSED);
     this.client = builder.client;
-    this.executor = builder.executor;
+
   }
 
   public void start() {
-    executor.submit(new Runnable() {
+    if (!readyState.compareAndSet(CLOSED, CONNECTING)) {
+      return;
+    }
+
+    connectionTask = executor.submit(new Runnable() {
       public void run() {
         connect();
       }
     });
   }
 
-  private void connect() {
-    if (!readyState.compareAndSet(CLOSED, CONNECTING)) {
-      return;
-    }
+  public void stop() {
+    connectionTask.cancel(true);
+    executor.shutdown();
+    readyState.set(CLOSED);
+  }
 
+  private void connect() {
     Request.Builder builder = new Request.Builder().headers(headers).url(uri.toASCIIString()).get();
     if (lastEventId != null && !lastEventId.isEmpty()) {
       builder.addHeader("Last-Event-ID", lastEventId);
@@ -89,6 +96,9 @@ public class EventSource implements ConnectionHandler
       Thread.sleep(reconnectTimeMs);
     } catch (InterruptedException e) {
     }
+    if (!readyState.compareAndSet(CLOSED, CONNECTING)) {
+      return;
+    }
     connect();
   }
 
@@ -115,8 +125,7 @@ public class EventSource implements ConnectionHandler
   }
 
   public static final class Builder {
-    private ExecutorService executor = Executors.newCachedThreadPool();
-    private long reconnectTimeMs = EventSource.DEFAULT_RECONNECT_TIME_MS;
+    private long reconnectTimeMs = DEFAULT_RECONNECT_TIME_MS;
     private final URI uri;
     private final EventHandler handler;
     private Headers headers = Headers.of();
@@ -125,11 +134,6 @@ public class EventSource implements ConnectionHandler
     public Builder(EventHandler handler, URI uri) {
       this.uri = uri;
       this.handler = handler;
-    }
-
-    public Builder executor(ExecutorService executor) {
-      this.executor = executor;
-      return this;
     }
 
     public Builder reconnectTimeMs(long reconnectTimeMs) {
@@ -153,7 +157,6 @@ public class EventSource implements ConnectionHandler
     }
   }
 
-  /*
   public static void main(String... args) {
     EventHandler handler = new EventHandler() {
       public void onOpen() throws Exception {
@@ -171,7 +174,13 @@ public class EventSource implements ConnectionHandler
     };
     EventSource source = new Builder(handler, URI.create("http://localhost:8080/events/")).build();
     source.start();
+    try {
+      Thread.sleep(10000);
+    } catch (InterruptedException e) {
+      e.printStackTrace();
+    }
+    source.stop();
   }
-  */
+
 
 }

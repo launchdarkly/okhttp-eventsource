@@ -55,7 +55,7 @@ public class EventSource implements ConnectionHandler
     }
 
     Request.Builder builder = new Request.Builder().headers(headers).url(uri.toASCIIString()).get();
-    if (lastEventId != null) {
+    if (lastEventId != null && !lastEventId.isEmpty()) {
       builder.addHeader("Last-Event-ID", lastEventId);
     }
     Response response = null;

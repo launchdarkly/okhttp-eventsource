@@ -38,7 +38,12 @@ public class EventSource implements ConnectionHandler
     this.executor = Executors.newCachedThreadPool();
     this.handler = new AsyncEventHandler(this.executor, builder.handler);
     this.readyState = new AtomicInteger(CLOSED);
-    this.client = builder.client;
+    this.client = builder.client.newBuilder()
+        .readTimeout(0, TimeUnit.SECONDS)
+        .writeTimeout(0, TimeUnit.SECONDS)
+        .connectTimeout(0, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .build();
 
   }
 

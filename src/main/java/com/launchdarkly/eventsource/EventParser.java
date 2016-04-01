@@ -18,7 +18,7 @@ public class EventParser {
 
   private final EventHandler handler;
   private final ConnectionHandler connectionHandler;
-  private final String origin;
+  private final URI origin;
 
   private StringBuffer data = new StringBuffer();
   private String lastEventId;
@@ -26,7 +26,7 @@ public class EventParser {
 
   EventParser(URI origin, EventHandler handler, ConnectionHandler connectionHandler) {
     this.handler = handler;
-    this.origin = origin.toASCIIString();
+    this.origin = origin;
     this.connectionHandler = connectionHandler;
   }
 

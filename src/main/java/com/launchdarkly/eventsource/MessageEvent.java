@@ -1,11 +1,13 @@
 package com.launchdarkly.eventsource;
 
+import java.net.URI;
+
 public class MessageEvent {
   private final String data;
   private final String lastEventId;
-  private final String origin;
+  private final URI origin;
 
-  public MessageEvent(String data, String lastEventId, String origin) {
+  public MessageEvent(String data, String lastEventId, URI origin) {
     this.data = data;
     this.lastEventId = lastEventId;
     this.origin = origin;
@@ -23,7 +25,7 @@ public class MessageEvent {
     return lastEventId;
   }
 
-  public String getOrigin() {
+  public URI getOrigin() {
     return origin;
   }
 

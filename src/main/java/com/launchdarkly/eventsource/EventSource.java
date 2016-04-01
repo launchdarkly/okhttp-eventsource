@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class EventSource implements ConnectionHandler
 {
-  public static final long DEFAULT_RECONNECT_TIME_MS = 2000;
+  public static final long DEFAULT_RECONNECT_TIME_MS = 1000;
 
   public static final int CONNECTING = 0;
   public static final int OPEN = 1;
@@ -26,7 +26,6 @@ public class EventSource implements ConnectionHandler
   private final ExecutorService executor;
   private volatile long reconnectTimeMs;
   private volatile String lastEventId;
-  private volatile Future<?> connectionTask;
   private final EventHandler handler;
   private AtomicInteger readyState;
   private final OkHttpClient client;
@@ -52,7 +51,7 @@ public class EventSource implements ConnectionHandler
       return;
     }
 
-    connectionTask = executor.submit(new Runnable() {
+     executor.execute(new Runnable() {
       public void run() {
         connect();
       }
@@ -60,9 +59,17 @@ public class EventSource implements ConnectionHandler
   }
 
   public void stop() {
-    connectionTask.cancel(true);
-    executor.shutdown();
-    readyState.set(CLOSED);
+      executor.shutdown();
+      try {
+        if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+          executor.shutdownNow();
+          if (!executor.awaitTermination(5, TimeUnit.SECONDS))
+            System.err.println("Pool did not terminate");
+        }
+      } catch (InterruptedException ie) {
+        executor.shutdownNow();
+        Thread.currentThread().interrupt();
+      }
   }
 
   private void connect() {
@@ -77,22 +84,37 @@ public class EventSource implements ConnectionHandler
         readyState.compareAndSet(CONNECTING, OPEN);
         BufferedSource bs = Okio.buffer(response.body().source());
         EventParser parser = new EventParser(uri, handler, EventSource.this);
-        for (String line; (line = bs.readUtf8LineStrict()) != null;) {
+        for (String line; !Thread.currentThread().isInterrupted() && (line = bs.readUtf8LineStrict()) != null;) {
           parser.line(line);
         }
       }
       else {
-        // Log an error
+        readyState.set(CLOSED);
+        try {
+          handler.onError(new UnsuccessfulResponseException(response.code()));
+          reconnect();
+        } catch (RejectedExecutionException ex) {
+          // During shutdown, we tried to send an error message to the event handler
+          // Do not reconnect; the executor has been shut down
+        }
       }
-    } catch (Exception e) {
-      handler.onError(e);
-      readyState.compareAndSet(CONNECTING, CLOSED);
+    } catch (RejectedExecutionException ex) {
+      // During shutdown, we tried to send a message to the event handler
+      // Do not reconnect; the executor has been shut down
+    }
+    catch (Exception e) {
+        readyState.set(CLOSED);
+        try {
+          handler.onError(e);
+          reconnect();
+        } catch (RejectedExecutionException ex) {
+          // During shutdown, we tried to send an error message to the event handler
+          // Do not reconnect; the executor has been shut down
+        }
     } finally {
-      readyState.compareAndSet(CONNECTING, CLOSED);
       if (response != null && response.body() != null) {
         response.body().close();
       }
-      reconnect();
     }
   }
 
@@ -162,6 +184,7 @@ public class EventSource implements ConnectionHandler
     }
   }
 
+
   public static void main(String... args) {
     EventHandler handler = new EventHandler() {
       public void onOpen() throws Exception {
@@ -184,7 +207,9 @@ public class EventSource implements ConnectionHandler
     } catch (InterruptedException e) {
       e.printStackTrace();
     }
+    System.out.println("Stopping source");
     source.stop();
+    System.out.println("Stopped");
   }
 
 

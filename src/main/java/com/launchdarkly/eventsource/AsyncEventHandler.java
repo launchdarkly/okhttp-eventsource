@@ -45,7 +45,6 @@ class AsyncEventHandler implements EventHandler {
         try {
           eventSourceHandler.onError(error);
         } catch (Throwable e) {
-          e.printStackTrace();
         }
       }
     });

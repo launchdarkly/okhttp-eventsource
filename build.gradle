@@ -104,9 +104,8 @@ uploadArchives {
 
                 developers {
                     developer {
-                        id 'jkodumal'
-                        name 'John Kodumal'
-                        email 'john@catamorphic.com'
+                        name 'LaunchDarkly'
+                        email 'team@launchdarkly.com'
                     }
                 }
             }

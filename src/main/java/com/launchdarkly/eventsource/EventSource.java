@@ -1,9 +1,6 @@
 package com.launchdarkly.eventsource;
 
-import okhttp3.Headers;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
+import okhttp3.*;
 import okio.BufferedSource;
 import okio.Okio;
 
@@ -23,18 +20,18 @@ public class EventSource implements ConnectionHandler
 
   private final URI uri;
   private final Headers headers;
-  private final ExecutorService executor;
+  private final ExecutorService executor = Executors.newCachedThreadPool();
   private volatile long reconnectTimeMs;
   private volatile String lastEventId;
   private final EventHandler handler;
   private AtomicInteger readyState;
   private final OkHttpClient client;
+  private Call call;
 
   EventSource(Builder builder) {
     this.uri = builder.uri;
     this.headers = addDefaultHeaders(builder.headers);
     this.reconnectTimeMs = builder.reconnectTimeMs;
-    this.executor = Executors.newCachedThreadPool();
     this.handler = new AsyncEventHandler(this.executor, builder.handler);
     this.readyState = new AtomicInteger(CLOSED);
     this.client = builder.client.newBuilder()
@@ -59,17 +56,10 @@ public class EventSource implements ConnectionHandler
   }
 
   public void stop() {
-      executor.shutdown();
-      try {
-        if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-          executor.shutdownNow();
-          if (!executor.awaitTermination(5, TimeUnit.SECONDS))
-            System.err.println("Pool did not terminate");
-        }
-      } catch (InterruptedException ie) {
-        executor.shutdownNow();
-        Thread.currentThread().interrupt();
+      if (call != null) {
+        call.cancel();
       }
+      executor.shutdown();
   }
 
   private void connect() {
@@ -79,7 +69,8 @@ public class EventSource implements ConnectionHandler
     }
     Response response = null;
     try {
-      response = client.newCall(builder.build()).execute();
+      call = client.newCall(builder.build());
+      response = call.execute();
       if (response.isSuccessful()) {
         readyState.compareAndSet(CONNECTING, OPEN);
         BufferedSource bs = Okio.buffer(response.body().source());

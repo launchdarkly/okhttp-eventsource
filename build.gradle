@@ -61,6 +61,14 @@ artifacts {
     archives sourcesJar, javadocJar
 }
 
+test {
+    testLogging {
+        events "passed", "skipped", "failed", "standardOut", "standardError"
+        showStandardStreams = true
+        exceptionFormat = 'full'
+    }
+}
+
 signing {
     sign configurations.archives
 }

@@ -1,22 +1,33 @@
 package com.launchdarkly.eventsource;
 
-import okhttp3.*;
+import okhttp3.Call;
+import okhttp3.Headers;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 import okio.BufferedSource;
 import okio.Okio;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class EventSource implements ConnectionHandler
+public class EventSource implements ConnectionHandler, Closeable
 {
   public static final long DEFAULT_RECONNECT_TIME_MS = 1000;
 
+  public static final int RAW = -1;
   public static final int CONNECTING = 0;
   public static final int OPEN = 1;
   public static final int CLOSED = 2;
+  public static final int SHUTDOWN = 3;
 
   private final URI uri;
   private final Headers headers;
@@ -26,14 +37,14 @@ public class EventSource implements ConnectionHandler
   private final EventHandler handler;
   private AtomicInteger readyState;
   private final OkHttpClient client;
-  private Call call;
+  private volatile Call call;
 
   EventSource(Builder builder) {
     this.uri = builder.uri;
     this.headers = addDefaultHeaders(builder.headers);
     this.reconnectTimeMs = builder.reconnectTimeMs;
     this.handler = new AsyncEventHandler(this.executor, builder.handler);
-    this.readyState = new AtomicInteger(CLOSED);
+    this.readyState = new AtomicInteger(RAW);
     this.client = builder.client.newBuilder()
         .readTimeout(0, TimeUnit.SECONDS)
         .writeTimeout(0, TimeUnit.SECONDS)
@@ -44,22 +55,26 @@ public class EventSource implements ConnectionHandler
   }
 
   public void start() {
-    if (!readyState.compareAndSet(CLOSED, CONNECTING)) {
+    if (!readyState.compareAndSet(RAW, CONNECTING)) {
       return;
     }
 
-     executor.execute(new Runnable() {
+    executor.execute(new Runnable() {
       public void run() {
         connect();
       }
     });
   }
 
-  public void stop() {
-      if (call != null) {
-        call.cancel();
-      }
-      executor.shutdown();
+  public void close() throws IOException {
+    int currentState = readyState.getAndSet(SHUTDOWN);
+    if (currentState == SHUTDOWN) {
+      return;
+    }
+    executor.shutdownNow();
+    if (call != null) {
+      call.cancel();
+    }
   }
 
   private void connect() {
@@ -105,6 +120,9 @@ public class EventSource implements ConnectionHandler
     } finally {
       if (response != null && response.body() != null) {
         response.body().close();
+      }
+      if (call != null) {
+        call.cancel();
       }
     }
   }
@@ -175,7 +193,6 @@ public class EventSource implements ConnectionHandler
     }
   }
 
-
   public static void main(String... args) {
     EventHandler handler = new EventHandler() {
       public void onOpen() throws Exception {
@@ -199,9 +216,11 @@ public class EventSource implements ConnectionHandler
       e.printStackTrace();
     }
     System.out.println("Stopping source");
-    source.stop();
+    try {
+      source.close();
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
     System.out.println("Stopped");
   }
-
-
 }

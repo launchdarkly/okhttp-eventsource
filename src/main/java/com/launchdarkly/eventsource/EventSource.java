@@ -3,6 +3,8 @@ package com.launchdarkly.eventsource;
 import okhttp3.*;
 import okio.BufferedSource;
 import okio.Okio;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.URI;
 import java.util.List;
@@ -10,8 +12,9 @@ import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class EventSource implements ConnectionHandler
-{
+public class EventSource implements ConnectionHandler {
+  private static final Logger logger = LoggerFactory.getLogger(EventSource.class);
+
   public static final long DEFAULT_RECONNECT_TIME_MS = 1000;
 
   public static final int CONNECTING = 0;
@@ -20,7 +23,7 @@ public class EventSource implements ConnectionHandler
 
   private final URI uri;
   private final Headers headers;
-  private final ExecutorService executor = Executors.newCachedThreadPool();
+  private final ExecutorService executor;
   private volatile long reconnectTimeMs;
   private volatile String lastEventId;
   private final EventHandler handler;
@@ -32,6 +35,7 @@ public class EventSource implements ConnectionHandler
     this.uri = builder.uri;
     this.headers = addDefaultHeaders(builder.headers);
     this.reconnectTimeMs = builder.reconnectTimeMs;
+    this.executor = Executors.newCachedThreadPool();
     this.handler = new AsyncEventHandler(this.executor, builder.handler);
     this.readyState = new AtomicInteger(CLOSED);
     this.client = builder.client.newBuilder()
@@ -48,7 +52,7 @@ public class EventSource implements ConnectionHandler
       return;
     }
 
-     executor.execute(new Runnable() {
+    executor.execute(new Runnable() {
       public void run() {
         connect();
       }
@@ -56,10 +60,10 @@ public class EventSource implements ConnectionHandler
   }
 
   public void stop() {
-      if (call != null) {
-        call.cancel();
-      }
-      executor.shutdown();
+    if (call != null) {
+      call.cancel();
+    }
+    executor.shutdown();
   }
 
   private void connect() {
@@ -78,8 +82,7 @@ public class EventSource implements ConnectionHandler
         for (String line; !Thread.currentThread().isInterrupted() && (line = bs.readUtf8LineStrict()) != null;) {
           parser.line(line);
         }
-      }
-      else {
+      } else {
         readyState.set(CLOSED);
         try {
           handler.onError(new UnsuccessfulResponseException(response.code()));
@@ -92,16 +95,15 @@ public class EventSource implements ConnectionHandler
     } catch (RejectedExecutionException ex) {
       // During shutdown, we tried to send a message to the event handler
       // Do not reconnect; the executor has been shut down
-    }
-    catch (Exception e) {
-        readyState.set(CLOSED);
-        try {
-          handler.onError(e);
-          reconnect();
-        } catch (RejectedExecutionException ex) {
-          // During shutdown, we tried to send an error message to the event handler
-          // Do not reconnect; the executor has been shut down
-        }
+    } catch (Exception e) {
+      readyState.set(CLOSED);
+      try {
+        handler.onError(e);
+        reconnect();
+      } catch (RejectedExecutionException ex) {
+        // During shutdown, we tried to send an error message to the event handler
+        // Do not reconnect; the executor has been shut down
+      }
     } finally {
       if (response != null && response.body() != null) {
         response.body().close();
@@ -126,7 +128,7 @@ public class EventSource implements ConnectionHandler
     builder.add("Accept", "text/event-stream").add("Cache-Control", "no-cache");
 
     for (Map.Entry<String, List<String>> header : custom.toMultimap().entrySet()) {
-      for (String value: header.getValue()) {
+      for (String value : header.getValue()) {
         builder.add(header.getKey(), value);
       }
     }

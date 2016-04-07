@@ -1,25 +1,37 @@
 package com.launchdarkly.eventsource;
 
+import okhttp3.Call;
 import okhttp3.Headers;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 import okio.BufferedSource;
 import okio.Okio;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class EventSource implements ConnectionHandler
+public class EventSource implements ConnectionHandler, Closeable
 {
+  private static final Logger logger = LoggerFactory.getLogger(EventSource.class);
+
   public static final long DEFAULT_RECONNECT_TIME_MS = 1000;
 
+  public static final int RAW = -1;
   public static final int CONNECTING = 0;
   public static final int OPEN = 1;
   public static final int CLOSED = 2;
+  public static final int SHUTDOWN = 3;
 
   private final URI uri;
   private final Headers headers;
@@ -29,6 +41,7 @@ public class EventSource implements ConnectionHandler
   private final EventHandler handler;
   private AtomicInteger readyState;
   private final OkHttpClient client;
+  private volatile Call call;
 
   EventSource(Builder builder) {
     this.uri = builder.uri;
@@ -36,7 +49,7 @@ public class EventSource implements ConnectionHandler
     this.reconnectTimeMs = builder.reconnectTimeMs;
     this.executor = Executors.newCachedThreadPool();
     this.handler = new AsyncEventHandler(this.executor, builder.handler);
-    this.readyState = new AtomicInteger(CLOSED);
+    this.readyState = new AtomicInteger(RAW);
     this.client = builder.client.newBuilder()
         .readTimeout(0, TimeUnit.SECONDS)
         .writeTimeout(0, TimeUnit.SECONDS)
@@ -47,29 +60,26 @@ public class EventSource implements ConnectionHandler
   }
 
   public void start() {
-    if (!readyState.compareAndSet(CLOSED, CONNECTING)) {
+    if (!readyState.compareAndSet(RAW, CONNECTING)) {
       return;
     }
 
-     executor.execute(new Runnable() {
+    executor.execute(new Runnable() {
       public void run() {
         connect();
       }
     });
   }
 
-  public void stop() {
-      executor.shutdown();
-      try {
-        if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-          executor.shutdownNow();
-          if (!executor.awaitTermination(5, TimeUnit.SECONDS))
-            System.err.println("Pool did not terminate");
-        }
-      } catch (InterruptedException ie) {
-        executor.shutdownNow();
-        Thread.currentThread().interrupt();
-      }
+  public void close() throws IOException {
+    int currentState = readyState.getAndSet(SHUTDOWN);
+    if (currentState == SHUTDOWN) {
+      return;
+    }
+    executor.shutdownNow();
+    if (call != null) {
+      call.cancel();
+    }
   }
 
   private void connect() {
@@ -79,7 +89,8 @@ public class EventSource implements ConnectionHandler
     }
     Response response = null;
     try {
-      response = client.newCall(builder.build()).execute();
+      call = client.newCall(builder.build());
+      response = call.execute();
       if (response.isSuccessful()) {
         readyState.compareAndSet(CONNECTING, OPEN);
         BufferedSource bs = Okio.buffer(response.body().source());
@@ -87,8 +98,7 @@ public class EventSource implements ConnectionHandler
         for (String line; !Thread.currentThread().isInterrupted() && (line = bs.readUtf8LineStrict()) != null;) {
           parser.line(line);
         }
-      }
-      else {
+      } else {
         readyState.set(CLOSED);
         try {
           handler.onError(new UnsuccessfulResponseException(response.code()));
@@ -101,19 +111,21 @@ public class EventSource implements ConnectionHandler
     } catch (RejectedExecutionException ex) {
       // During shutdown, we tried to send a message to the event handler
       // Do not reconnect; the executor has been shut down
-    }
-    catch (Exception e) {
-        readyState.set(CLOSED);
-        try {
-          handler.onError(e);
-          reconnect();
-        } catch (RejectedExecutionException ex) {
-          // During shutdown, we tried to send an error message to the event handler
-          // Do not reconnect; the executor has been shut down
-        }
+    } catch (Exception e) {
+      readyState.set(CLOSED);
+      try {
+        handler.onError(e);
+        reconnect();
+      } catch (RejectedExecutionException ex) {
+        // During shutdown, we tried to send an error message to the event handler
+        // Do not reconnect; the executor has been shut down
+      }
     } finally {
       if (response != null && response.body() != null) {
         response.body().close();
+      }
+      if (call != null) {
+        call.cancel();
       }
     }
   }
@@ -135,7 +147,7 @@ public class EventSource implements ConnectionHandler
     builder.add("Accept", "text/event-stream").add("Cache-Control", "no-cache");
 
     for (Map.Entry<String, List<String>> header : custom.toMultimap().entrySet()) {
-      for (String value: header.getValue()) {
+      for (String value : header.getValue()) {
         builder.add(header.getKey(), value);
       }
     }
@@ -184,7 +196,6 @@ public class EventSource implements ConnectionHandler
     }
   }
 
-
   public static void main(String... args) {
     EventHandler handler = new EventHandler() {
       public void onOpen() throws Exception {
@@ -208,9 +219,11 @@ public class EventSource implements ConnectionHandler
       e.printStackTrace();
     }
     System.out.println("Stopping source");
-    source.stop();
+    try {
+      source.close();
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
     System.out.println("Stopped");
   }
-
-
 }

@@ -1,9 +1,9 @@
 package com.launchdarkly.eventsource;
 
-public enum ReadyState {
+enum ReadyState {
   RAW,
   CONNECTING,
   OPEN,
   CLOSED,
-  SHUTDOWN;
+  SHUTDOWN
 }

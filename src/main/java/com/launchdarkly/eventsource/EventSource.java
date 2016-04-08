@@ -23,6 +23,10 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static com.launchdarkly.eventsource.ReadyState.*;
 
+/**
+ * Client for <a href="https://www.w3.org/TR/2015/REC-eventsource-20150203/">Server-Sent Events</a>
+ * aka EventSource
+ */
 public class EventSource implements ConnectionHandler, Closeable {
   private static final Logger logger = LoggerFactory.getLogger(EventSource.class);
 
@@ -30,7 +34,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   private final URI uri;
   private final Headers headers;
   private final ExecutorService executor;
-  private volatile long reconnectTimeMs;
+  private volatile long reconnectTimeMs = 0;
   private volatile String lastEventId;
   private final EventHandler handler;
   private final AtomicReference<ReadyState> readyState;
@@ -80,52 +84,54 @@ public class EventSource implements ConnectionHandler, Closeable {
   }
 
   private void connect() {
-    Request.Builder builder = new Request.Builder().headers(headers).url(uri.toASCIIString()).get();
-    if (lastEventId != null && !lastEventId.isEmpty()) {
-      builder.addHeader("Last-Event-ID", lastEventId);
-    }
     Response response = null;
     try {
-      call = client.newCall(builder.build());
-      response = call.execute();
-      if (response.isSuccessful()) {
-        ReadyState currentState = readyState.getAndSet(OPEN);
-        if (currentState != CONNECTING) {
-          logger.warn("Unexpected readyState change: " + currentState + " -> " + OPEN);
-        } else {
-          logger.debug("readyState change: " + currentState + " -> " + OPEN);
-        }
-
-        BufferedSource bs = Okio.buffer(response.body().source());
-        EventParser parser = new EventParser(uri, handler, EventSource.this);
-        for (String line; !Thread.currentThread().isInterrupted() && (line = bs.readUtf8LineStrict()) != null; ) {
-          parser.line(line);
-        }
-      } else {
-        ReadyState currentState = readyState.getAndSet(CLOSED);
-        logger.debug("readyState change: " + currentState + " -> " + CLOSED);
+      while (!Thread.currentThread().isInterrupted() && readyState.get() != SHUTDOWN) {
         try {
-          handler.onError(new UnsuccessfulResponseException(response.code()));
-          reconnect();
-        } catch (RejectedExecutionException ignored) {
-          // During shutdown, we tried to send an error message to the event handler
-          // Do not reconnect; the executor has been shut down
+          Thread.sleep(reconnectTimeMs);
+        } catch (InterruptedException ignored) {
+        }
+        logger.debug("readyState change: " + readyState.getAndSet(CONNECTING) + " -> " + CONNECTING);
+        try {
+          Request.Builder builder = new Request.Builder()
+              .headers(headers)
+              .url(uri.toASCIIString())
+              .get();
+
+          if (lastEventId != null && !lastEventId.isEmpty()) {
+            builder.addHeader("Last-Event-ID", lastEventId);
+          }
+
+          call = client.newCall(builder.build());
+          response = call.execute();
+          if (response.isSuccessful()) {
+            ReadyState currentState = readyState.getAndSet(OPEN);
+            if (currentState != CONNECTING) {
+              logger.warn("Unexpected readyState change: " + currentState + " -> " + OPEN);
+            } else {
+              logger.debug("readyState change: " + currentState + " -> " + OPEN);
+            }
+
+            BufferedSource bs = Okio.buffer(response.body().source());
+            EventParser parser = new EventParser(uri, handler, EventSource.this);
+            for (String line; !Thread.currentThread().isInterrupted() && (line = bs.readUtf8LineStrict()) != null; ) {
+              parser.line(line);
+            }
+          } else {
+            logger.debug("readyState change: " + readyState.getAndSet(CLOSED) + " -> " + CLOSED);
+            handler.onError(new UnsuccessfulResponseException(response.code()));
+          }
+        } catch (IOException e) {
+          logger.error("Connection problem: " + e.getMessage() + ".  Retrying after " + reconnectTimeMs + " milliseconds");
+          logger.debug("Exception: ", e);
+          logger.debug("readyState change: " + readyState.getAndSet(CLOSED) + " -> " + CLOSED);
+          handler.onError(e);
         }
       }
+
     } catch (RejectedExecutionException ignored) {
       // During shutdown, we tried to send a message to the event handler
       // Do not reconnect; the executor has been shut down
-    } catch (Exception e) {
-      ReadyState currentState = readyState.getAndSet(CLOSED);
-      logger.debug("readyState change: " + currentState + " -> " + CLOSED);
-      try {
-        handler.onError(e);
-        logger.debug("");
-        reconnect();
-      } catch (RejectedExecutionException ignored) {
-        // During shutdown, we tried to send an error message to the event handler
-        // Do not reconnect; the executor has been shut down
-      }
     } finally {
       if (response != null && response.body() != null) {
         response.body().close();
@@ -134,18 +140,6 @@ public class EventSource implements ConnectionHandler, Closeable {
         call.cancel();
       }
     }
-  }
-
-  private void reconnect() {
-    try {
-      Thread.sleep(reconnectTimeMs);
-    } catch (InterruptedException ignored) {
-    }
-    if (!readyState.compareAndSet(CLOSED, CONNECTING)) {
-      return;
-    }
-    logger.debug("readyState change: " + CLOSED + " -> " + CONNECTING);
-    connect();
   }
 
   private static Headers addDefaultHeaders(Headers custom) {

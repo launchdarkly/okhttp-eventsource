@@ -44,7 +44,7 @@ class AsyncEventHandler implements EventHandler {
       public void run() {
         try {
           eventSourceHandler.onError(error);
-        } catch (Throwable e) {
+        } catch (Throwable ignored) {
         }
       }
     });

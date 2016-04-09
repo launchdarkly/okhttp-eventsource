@@ -1,5 +1,8 @@
 package com.launchdarkly.eventsource;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.net.URI;
 import java.util.regex.Pattern;
 
@@ -7,6 +10,7 @@ import java.util.regex.Pattern;
  * Adapted from https://github.com/aslakhellesoy/eventsource-java/blob/master/src/main/java/com/github/eventsource/client/impl/EventStreamParser.java
  */
 public class EventParser {
+  private static final Logger logger = LoggerFactory.getLogger(EventParser.class);
   private static final String DATA = "data";
   private static final String ID = "id";
   private static final String EVENT = "event";
@@ -31,6 +35,7 @@ public class EventParser {
   }
 
   public void line(String line) {
+    logger.debug("Parsing line: " + line);
     int colonIndex;
     if (line.trim().isEmpty()) {
       dispatchEvent();

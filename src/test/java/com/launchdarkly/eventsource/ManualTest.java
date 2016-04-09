@@ -13,15 +13,14 @@ public class ManualTest {
   private static final Logger logger = LoggerFactory.getLogger(ManualTest.class);
 
   @Test
-  public void manualTest() {
+  public void manualTest() throws InterruptedException {
     EventHandler handler = new EventHandler() {
       public void onOpen() throws Exception {
-        logger.debug("Open");
+        logger.info("Open");
       }
 
       public void onMessage(String event, MessageEvent messageEvent) throws Exception {
-        logger.debug(event + ": " + messageEvent.getData());
-
+        logger.info(event + ": " + messageEvent.getData());
       }
 
       public void onError(Throwable t) {
@@ -30,11 +29,8 @@ public class ManualTest {
     };
     EventSource source = new EventSource.Builder(handler, URI.create("http://localhost:8080/events/")).build();
     source.start();
-    try {
-      Thread.sleep(100000000000L);
-    } catch (InterruptedException e) {
-      e.printStackTrace();
-    }
+    logger.warn("Sleeping...");
+    Thread.sleep(10000L);
     logger.debug("Stopping source");
     try {
       source.close();

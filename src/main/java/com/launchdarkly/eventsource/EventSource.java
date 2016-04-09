@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
+import java.io.EOFException;
 import java.io.IOException;
 import java.net.URI;
 import java.util.List;
@@ -87,9 +88,12 @@ public class EventSource implements ConnectionHandler, Closeable {
     Response response = null;
     try {
       while (!Thread.currentThread().isInterrupted() && readyState.get() != SHUTDOWN) {
-        try {
-          Thread.sleep(reconnectTimeMs);
-        } catch (InterruptedException ignored) {
+        if (reconnectTimeMs > 0) {
+          logger.info("Waiting " + reconnectTimeMs + " milliseconds before connecting..");
+          try {
+            Thread.sleep(reconnectTimeMs);
+          } catch (InterruptedException ignored) {
+          }
         }
         logger.debug("readyState change: " + readyState.getAndSet(CONNECTING) + " -> " + CONNECTING);
         try {
@@ -111,7 +115,7 @@ public class EventSource implements ConnectionHandler, Closeable {
             } else {
               logger.debug("readyState change: " + currentState + " -> " + OPEN);
             }
-
+            logger.info("Connected to Event Source stream.");
             BufferedSource bs = Okio.buffer(response.body().source());
             EventParser parser = new EventParser(uri, handler, EventSource.this);
             for (String line; !Thread.currentThread().isInterrupted() && (line = bs.readUtf8LineStrict()) != null; ) {
@@ -119,16 +123,18 @@ public class EventSource implements ConnectionHandler, Closeable {
             }
           } else {
             logger.debug("readyState change: " + readyState.getAndSet(CLOSED) + " -> " + CLOSED);
+            logger.debug("Unsuccessful Response: " + response);
             handler.onError(new UnsuccessfulResponseException(response.code()));
           }
-        } catch (IOException e) {
-          logger.error("Connection problem: " + e.getMessage() + ".  Retrying after " + reconnectTimeMs + " milliseconds");
-          logger.debug("Exception: ", e);
+        } catch (EOFException eofe) {
           logger.debug("readyState change: " + readyState.getAndSet(CLOSED) + " -> " + CLOSED);
-          handler.onError(e);
+          logger.warn("Connection unexpectedly closed.");
+        } catch (IOException ioe) {
+          logger.debug("readyState change: " + readyState.getAndSet(CLOSED) + " -> " + CLOSED);
+          logger.debug("Connection problem.", ioe);
+          handler.onError(ioe);
         }
       }
-
     } catch (RejectedExecutionException ignored) {
       // During shutdown, we tried to send a message to the event handler
       // Do not reconnect; the executor has been shut down

@@ -95,7 +95,8 @@ public class EventSource implements ConnectionHandler, Closeable {
           } catch (InterruptedException ignored) {
           }
         }
-        logger.debug("readyState change: " + readyState.getAndSet(CONNECTING) + " -> " + CONNECTING);
+        ReadyState currentState = readyState.getAndSet(CONNECTING);
+        logger.debug("readyState change: " + currentState + " -> " + CONNECTING);
         try {
           Request.Builder builder = new Request.Builder()
               .headers(headers)
@@ -109,7 +110,7 @@ public class EventSource implements ConnectionHandler, Closeable {
           call = client.newCall(builder.build());
           response = call.execute();
           if (response.isSuccessful()) {
-            ReadyState currentState = readyState.getAndSet(OPEN);
+            currentState = readyState.getAndSet(OPEN);
             if (currentState != CONNECTING) {
               logger.warn("Unexpected readyState change: " + currentState + " -> " + OPEN);
             } else {
@@ -122,29 +123,28 @@ public class EventSource implements ConnectionHandler, Closeable {
               parser.line(line);
             }
           } else {
-            logger.debug("readyState change: " + readyState.getAndSet(CLOSED) + " -> " + CLOSED);
             logger.debug("Unsuccessful Response: " + response);
             handler.onError(new UnsuccessfulResponseException(response.code()));
           }
         } catch (EOFException eofe) {
-          logger.debug("readyState change: " + readyState.getAndSet(CLOSED) + " -> " + CLOSED);
           logger.warn("Connection unexpectedly closed.");
         } catch (IOException ioe) {
-          logger.debug("readyState change: " + readyState.getAndSet(CLOSED) + " -> " + CLOSED);
           logger.debug("Connection problem.", ioe);
           handler.onError(ioe);
+        } finally {
+          currentState = readyState.getAndSet(CLOSED);
+          logger.debug("readyState change: " + currentState + " -> " + CLOSED);
+          if (response != null && response.body() != null) {
+            response.body().close();
+          }
+          if (call != null) {
+            call.cancel();
+          }
         }
       }
     } catch (RejectedExecutionException ignored) {
       // During shutdown, we tried to send a message to the event handler
       // Do not reconnect; the executor has been shut down
-    } finally {
-      if (response != null && response.body() != null) {
-        response.body().close();
-      }
-      if (call != null) {
-        call.cancel();
-      }
     }
   }
 

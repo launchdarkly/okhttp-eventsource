@@ -86,15 +86,11 @@ public class EventSource implements ConnectionHandler, Closeable {
 
   private void connect() {
     Response response = null;
+    boolean isReconnect = false;
     try {
       while (!Thread.currentThread().isInterrupted() && readyState.get() != SHUTDOWN) {
-        if (reconnectTimeMs > 0) {
-          logger.info("Waiting " + reconnectTimeMs + " milliseconds before connecting..");
-          try {
-            Thread.sleep(reconnectTimeMs);
-          } catch (InterruptedException ignored) {
-          }
-        }
+        maybeWait(isReconnect);
+        isReconnect = true;
         ReadyState currentState = readyState.getAndSet(CONNECTING);
         logger.debug("readyState change: " + currentState + " -> " + CONNECTING);
         try {
@@ -145,6 +141,16 @@ public class EventSource implements ConnectionHandler, Closeable {
     } catch (RejectedExecutionException ignored) {
       // During shutdown, we tried to send a message to the event handler
       // Do not reconnect; the executor has been shut down
+    }
+  }
+
+  private void maybeWait(boolean isReconnect) {
+    if (reconnectTimeMs > 0 && isReconnect) {
+      logger.info("Waiting " + reconnectTimeMs + " milliseconds before connecting..");
+      try {
+        Thread.sleep(reconnectTimeMs);
+      } catch (InterruptedException ignored) {
+      }
     }
   }
 

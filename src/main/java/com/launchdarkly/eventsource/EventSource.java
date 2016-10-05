@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -32,6 +33,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   private static final Logger logger = LoggerFactory.getLogger(EventSource.class);
 
   private static final long DEFAULT_RECONNECT_TIME_MS = 1000;
+  static final long MAX_RECONNECT_TIME_MS = 30000;
   private final URI uri;
   private final Headers headers;
   private final ExecutorService executor;
@@ -41,6 +43,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   private final AtomicReference<ReadyState> readyState;
   private final OkHttpClient client;
   private volatile Call call;
+  private final Random jitter = new Random();
 
   EventSource(Builder builder) {
     this.uri = builder.uri;
@@ -86,11 +89,10 @@ public class EventSource implements ConnectionHandler, Closeable {
 
   private void connect() {
     Response response = null;
-    boolean isReconnect = false;
+    int reconnectAttempts = 0;
     try {
       while (!Thread.currentThread().isInterrupted() && readyState.get() != SHUTDOWN) {
-        maybeWait(isReconnect);
-        isReconnect = true;
+        maybeWaitWithBackoff(reconnectAttempts++);
         ReadyState currentState = readyState.getAndSet(CONNECTING);
         logger.debug("readyState change: " + currentState + " -> " + CONNECTING);
         try {
@@ -106,6 +108,7 @@ public class EventSource implements ConnectionHandler, Closeable {
           call = client.newCall(builder.build());
           response = call.execute();
           if (response.isSuccessful()) {
+            reconnectAttempts = 0;
             currentState = readyState.getAndSet(OPEN);
             if (currentState != CONNECTING) {
               logger.warn("Unexpected readyState change: " + currentState + " -> " + OPEN);
@@ -144,14 +147,42 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
   }
 
-  private void maybeWait(boolean isReconnect) {
-    if (reconnectTimeMs > 0 && isReconnect) {
-      logger.info("Waiting " + reconnectTimeMs + " milliseconds before connecting..");
+  private void maybeWaitWithBackoff(int reconnectAttempts) {
+    if (reconnectTimeMs > 0 && reconnectAttempts > 0) {
       try {
-        Thread.sleep(reconnectTimeMs);
+        long sleepTimeMs = backoffWithJitter(reconnectAttempts);
+        logger.info("Waiting " + sleepTimeMs + " milliseconds before reconnecting...");
+        Thread.sleep(sleepTimeMs);
       } catch (InterruptedException ignored) {
       }
     }
+  }
+
+  long backoffWithJitter(int reconnectAttempts) {
+    long jitterVal = Math.min(MAX_RECONNECT_TIME_MS, reconnectTimeMs * pow2(reconnectAttempts));
+    return jitterVal / 2 +  nextLong(jitter, jitterVal) / 2;
+  }
+
+  // Returns 2**k, or Integer.MAX_VALUE if 2**k would overflow
+  private int pow2(int k) {
+    return (k < Integer.SIZE - 1) ? (1 << k) : Integer.MAX_VALUE;
+  }
+
+  // Adapted from http://stackoverflow.com/questions/2546078/java-random-long-number-in-0-x-n-range
+  // Since ThreadLocalRandom.current().nextLong(n) requires Android 5
+  private long nextLong(Random rand, long bound) {
+    if (bound <= 0) {
+      throw new IllegalArgumentException("bound must be positive");
+    }
+
+    long r = rand.nextLong() & Long.MAX_VALUE;
+    long m = bound - 1L;
+    if ((bound & m) == 0) { // i.e., bound is a power of 2
+      r = (bound * r) >> (Long.SIZE - 1);
+    } else {
+      for (long u = r; u - (r = u % bound) + m < 0L; u = rand.nextLong() & Long.MAX_VALUE);
+    }
+    return r;
   }
 
   private static Headers addDefaultHeaders(Headers custom) {

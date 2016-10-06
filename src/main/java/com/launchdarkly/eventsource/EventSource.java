@@ -219,16 +219,32 @@ public class EventSource implements ConnectionHandler, Closeable {
       this.handler = handler;
     }
 
+    /**
+     * Set the reconnect base time for the EventSource connection in milliseconds. Reconnect attempts are computed
+     * from this base value with an exponential backoff and jitter.
+     * @param reconnectTimeMs the reconnect base time in milliseconds
+     * @return the builder
+     */
     public Builder reconnectTimeMs(long reconnectTimeMs) {
       this.reconnectTimeMs = reconnectTimeMs;
       return this;
     }
 
+    /**
+     * Set the headers to be sent when establishing the EventSource connection.
+     * @param headers headers to be sent with the EventSource request
+     * @return the builder
+     */
     public Builder headers(Headers headers) {
       this.headers = headers;
       return this;
     }
 
+    /**
+     * Set a custom HTTP client that will be used to make the EventSource connection
+     * @param client the HTTP client
+     * @return the builder
+     */
     public Builder client(OkHttpClient client) {
       this.client = client;
       return this;

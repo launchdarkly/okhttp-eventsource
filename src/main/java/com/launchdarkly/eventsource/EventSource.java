@@ -1,10 +1,7 @@
 package com.launchdarkly.eventsource;
 
-import okhttp3.Call;
-import okhttp3.Headers;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import okhttp3.*;
 import okio.BufferedSource;
 import okio.Okio;
 import org.slf4j.Logger;
@@ -17,10 +14,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.launchdarkly.eventsource.ReadyState.*;
@@ -49,10 +43,14 @@ public class EventSource implements ConnectionHandler, Closeable {
     this.uri = builder.uri;
     this.headers = addDefaultHeaders(builder.headers);
     this.reconnectTimeMs = builder.reconnectTimeMs;
-    this.executor = Executors.newCachedThreadPool();
+    ThreadFactory threadFactory = new ThreadFactoryBuilder()
+        .setNameFormat("okhttp-eventsource-%d")
+        .build();
+    this.executor = Executors.newCachedThreadPool(threadFactory);
     this.handler = new AsyncEventHandler(this.executor, builder.handler);
     this.readyState = new AtomicReference<>(RAW);
     this.client = builder.client.newBuilder()
+        .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
         .readTimeout(0, TimeUnit.SECONDS)
         .writeTimeout(0, TimeUnit.SECONDS)
         .connectTimeout(0, TimeUnit.SECONDS)
@@ -82,8 +80,17 @@ public class EventSource implements ConnectionHandler, Closeable {
       return;
     }
     executor.shutdownNow();
-    if (call != null) {
-      call.cancel();
+
+    if (client != null) {
+      if (client.connectionPool() != null) {
+        client.connectionPool().evictAll();
+      }
+      if (client.dispatcher() != null) {
+        client.dispatcher().cancelAll();
+        if (client.dispatcher().executorService() != null) {
+          client.dispatcher().executorService().shutdownNow();
+        }
+      }
     }
   }
 
@@ -160,7 +167,7 @@ public class EventSource implements ConnectionHandler, Closeable {
 
   long backoffWithJitter(int reconnectAttempts) {
     long jitterVal = Math.min(MAX_RECONNECT_TIME_MS, reconnectTimeMs * pow2(reconnectAttempts));
-    return jitterVal / 2 +  nextLong(jitter, jitterVal) / 2;
+    return jitterVal / 2 + nextLong(jitter, jitterVal) / 2;
   }
 
   // Returns 2**k, or Integer.MAX_VALUE if 2**k would overflow
@@ -180,7 +187,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     if ((bound & m) == 0) { // i.e., bound is a power of 2
       r = (bound * r) >> (Long.SIZE - 1);
     } else {
-      for (long u = r; u - (r = u % bound) + m < 0L; u = rand.nextLong() & Long.MAX_VALUE);
+      for (long u = r; u - (r = u % bound) + m < 0L; u = rand.nextLong() & Long.MAX_VALUE) ;
     }
     return r;
   }
@@ -222,6 +229,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     /**
      * Set the reconnect base time for the EventSource connection in milliseconds. Reconnect attempts are computed
      * from this base value with an exponential backoff and jitter.
+     *
      * @param reconnectTimeMs the reconnect base time in milliseconds
      * @return the builder
      */
@@ -232,6 +240,7 @@ public class EventSource implements ConnectionHandler, Closeable {
 
     /**
      * Set the headers to be sent when establishing the EventSource connection.
+     *
      * @param headers headers to be sent with the EventSource request
      * @return the builder
      */
@@ -242,6 +251,7 @@ public class EventSource implements ConnectionHandler, Closeable {
 
     /**
      * Set a custom HTTP client that will be used to make the EventSource connection
+     *
      * @param client the HTTP client
      * @return the builder
      */

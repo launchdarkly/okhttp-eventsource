@@ -32,8 +32,8 @@ class AsyncEventHandler implements EventHandler {
       public void run() {
         try {
           eventSourceHandler.onComment(comment);
-        } catch (Throwable ignored) {
-
+        } catch (Exception e) {
+          onError(e);
         }
       }
     });

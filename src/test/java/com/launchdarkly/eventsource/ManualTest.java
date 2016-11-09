@@ -16,7 +16,7 @@ public class ManualTest {
   public void manualTest() throws InterruptedException {
     EventHandler handler = new EventHandler() {
       public void onOpen() throws Exception {
-        logger.info("Open");
+        logger.info("open");
       }
 
       public void onMessage(String event, MessageEvent messageEvent) throws Exception {
@@ -25,6 +25,9 @@ public class ManualTest {
 
       public void onError(Throwable t) {
         logger.error("Error: " + t);
+      }
+      public void onComment(String comment) {
+        logger.info("comment: " + comment);
       }
     };
     EventSource source = new EventSource.Builder(handler, URI.create("http://localhost:8080/events/")).build();

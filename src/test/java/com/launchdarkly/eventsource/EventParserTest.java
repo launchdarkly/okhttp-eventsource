@@ -72,13 +72,15 @@ public class EventParserTest {
   }
 
   @Test
-  public void ignoresLinesStartingWithColon() throws Exception {
-    parser.line(": ignore this");
+  public void sendsCommentsForLinesStartingWithColon() throws Exception {
+    parser.line(": first comment");
     parser.line("data: hello");
-    parser.line(": this too");
+    parser.line(": second comment");
     parser.line("");
 
     verify(eventHandler).onMessage(eq("message"), eq(new MessageEvent("hello", null, ORIGIN)));
+    verify(eventHandler).onComment(eq("first comment"));
+    verify(eventHandler).onComment(eq("second comment"));
   }
 
   @Test

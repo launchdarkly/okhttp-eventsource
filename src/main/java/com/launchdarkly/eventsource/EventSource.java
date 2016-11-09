@@ -72,6 +72,10 @@ public class EventSource implements ConnectionHandler, Closeable {
     });
   }
 
+  public ReadyState getState() {
+    return readyState.get();
+  }
+
   @Override
   public void close() throws IOException {
     ReadyState currentState = readyState.getAndSet(SHUTDOWN);

@@ -40,13 +40,21 @@ public class EventParser {
     if (line.trim().isEmpty()) {
       dispatchEvent();
     } else if (line.startsWith(":")) {
-      // ignore
+      processComment(line.substring(1).trim());
     } else if ((colonIndex = line.indexOf(":")) != -1) {
       String field = line.substring(0, colonIndex);
       String value = line.substring(colonIndex + 1).replaceFirst(" ", EMPTY_STRING);
       processField(field, value);
     } else {
       processField(line.trim(), EMPTY_STRING); // The spec doesn't say we need to trim the line, but I assume that's an oversight.
+    }
+  }
+
+  private void processComment(String comment) {
+    try {
+      handler.onComment(comment);
+    } catch (Exception e) {
+      handler.onError(e);
     }
   }
 

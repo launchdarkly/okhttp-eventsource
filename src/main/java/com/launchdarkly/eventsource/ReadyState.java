@@ -1,6 +1,6 @@
 package com.launchdarkly.eventsource;
 
-enum ReadyState {
+public enum ReadyState {
   RAW,
   CONNECTING,
   OPEN,

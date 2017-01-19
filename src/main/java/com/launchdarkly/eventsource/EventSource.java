@@ -127,6 +127,11 @@ public class EventSource implements ConnectionHandler, Closeable {
               logger.debug("readyState change: " + currentState + " -> " + OPEN);
             }
             logger.info("Connected to Event Source stream.");
+            try {
+              handler.onOpen();
+            } catch (Exception e) {
+              handler.onError(e);
+            }
             BufferedSource bs = Okio.buffer(response.body().source());
             EventParser parser = new EventParser(uri, handler, EventSource.this);
             for (String line; !Thread.currentThread().isInterrupted() && (line = bs.readUtf8LineStrict()) != null; ) {

@@ -218,8 +218,8 @@ public class EventSource implements ConnectionHandler, Closeable {
     this.lastEventId = lastEventId;
   }
 
-  public void getUri(URI uri) {
-    this.uri = uri;
+  public URI getUri() {
+    return this.uri;
   }
 
   public void setUri(URI uri) {

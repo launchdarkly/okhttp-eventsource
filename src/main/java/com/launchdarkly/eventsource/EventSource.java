@@ -28,7 +28,7 @@ public class EventSource implements ConnectionHandler, Closeable {
 
   private static final long DEFAULT_RECONNECT_TIME_MS = 1000;
   static final long MAX_RECONNECT_TIME_MS = 30000;
-  private final URI uri;
+  private URI uri;
   private final Headers headers;
   private final ExecutorService executor;
   private volatile long reconnectTimeMs = 0;
@@ -216,6 +216,14 @@ public class EventSource implements ConnectionHandler, Closeable {
 
   public void setLastEventId(String lastEventId) {
     this.lastEventId = lastEventId;
+  }
+
+  public void getUri(URI uri) {
+    this.uri = uri;
+  }
+
+  public void setUri(URI uri) {
+    this.uri = uri;
   }
 
   public static final class Builder {

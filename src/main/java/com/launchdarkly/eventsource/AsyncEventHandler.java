@@ -27,6 +27,18 @@ class AsyncEventHandler implements EventHandler {
     });
   }
 
+  public void onClosed() {
+    executor.execute(new Runnable() {
+      public void run() {
+        try {
+          eventSourceHandler.onClosed();
+        } catch (Exception e) {
+          onError(e);
+        }
+      }
+    });
+  }
+
   public void onComment(final String comment) {
     executor.execute(new Runnable() {
       public void run() {

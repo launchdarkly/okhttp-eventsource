@@ -28,7 +28,7 @@ public class EventSource implements ConnectionHandler, Closeable {
 
   private static final long DEFAULT_RECONNECT_TIME_MS = 1000;
   static final long MAX_RECONNECT_TIME_MS = 30000;
-  private URI uri;
+  private volatile URI uri;
   private final Headers headers;
   private final ExecutorService executor;
   private volatile long reconnectTimeMs = 0;

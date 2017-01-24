@@ -10,6 +10,9 @@ import org.slf4j.LoggerFactory;
 import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
+import java.net.Proxy.Type;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +58,7 @@ public class EventSource implements ConnectionHandler, Closeable {
         .writeTimeout(0, TimeUnit.SECONDS)
         .connectTimeout(0, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        .proxy(builder.proxy)
         .build();
   }
 
@@ -231,6 +235,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     private final URI uri;
     private final EventHandler handler;
     private Headers headers = Headers.of();
+    private Proxy proxy;
     private OkHttpClient client = new OkHttpClient();
 
     public Builder(EventHandler handler, URI uri) {
@@ -270,6 +275,18 @@ public class EventSource implements ConnectionHandler, Closeable {
     public Builder client(OkHttpClient client) {
       this.client = client;
       return this;
+    }
+
+    /**
+     * Set the HTTP proxy address to be used to make the EventSource connection
+     *
+     * @param proxyHost the proxy hostname
+     * @param proxyPort the proxy port
+     * @return the builder
+     */
+    public Builder proxy(String proxyHost, int proxyPort) {
+    	proxy = new Proxy(Type.HTTP, new InetSocketAddress(proxyHost, proxyPort));
+    	return this;
     }
 
     public EventSource build() {

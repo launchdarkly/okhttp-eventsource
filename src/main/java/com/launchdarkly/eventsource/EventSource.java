@@ -87,6 +87,13 @@ public class EventSource implements ConnectionHandler, Closeable {
     if (currentState == SHUTDOWN) {
       return;
     }
+    if (currentState == ReadyState.OPEN) {
+      try {
+        handler.onClosed();
+      } catch (Exception e) {
+        handler.onError(e);
+      }
+    }
     executor.shutdownNow();
 
     if (client != null) {
@@ -153,6 +160,13 @@ public class EventSource implements ConnectionHandler, Closeable {
           }
           if (call != null) {
             call.cancel();
+          }
+          if (currentState == ReadyState.OPEN) {
+            try {
+              handler.onClosed();
+            } catch (Exception e) {
+              handler.onError(e);
+            }
           }
         }
       }

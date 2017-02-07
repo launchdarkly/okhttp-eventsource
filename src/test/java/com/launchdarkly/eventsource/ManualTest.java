@@ -19,6 +19,11 @@ public class ManualTest {
         logger.info("open");
       }
 
+      @Override
+      public void onClosed() throws Exception {
+
+      }
+
       public void onMessage(String event, MessageEvent messageEvent) throws Exception {
         logger.info(event + ": " + messageEvent.getData());
       }

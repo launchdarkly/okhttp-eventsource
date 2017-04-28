@@ -50,7 +50,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     ThreadFactory threadFactory = new ThreadFactoryBuilder()
         .setNameFormat("okhttp-eventsource-%d")
         .build();
-    this.executor = Executors.newCachedThreadPool(threadFactory);
+    this.executor = Executors.newSingleThreadExecutor(threadFactory);
     this.handler = new AsyncEventHandler(this.executor, builder.handler);
     this.readyState = new AtomicReference<>(RAW);
 

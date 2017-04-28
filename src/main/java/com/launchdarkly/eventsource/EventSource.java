@@ -7,6 +7,9 @@ import okio.Okio;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509TrustManager;
 import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
@@ -14,6 +17,9 @@ import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.net.Proxy.Type;
 import java.net.URI;
+import java.security.GeneralSecurityException;
+import java.security.KeyStore;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -61,6 +67,12 @@ public class EventSource implements ConnectionHandler, Closeable {
         .connectTimeout(0, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .proxy(builder.proxy);
+
+    try {
+      clientBuilder.sslSocketFactory(new ModernTLSSocketFactory(), defaultTrustManager());
+    } catch (GeneralSecurityException e) {
+        // TLS is not available, so don't set up the socket factory, swallow the exception
+    }
 
     if (builder.proxyAuthenticator != null) {
       clientBuilder.proxyAuthenticator(builder.proxyAuthenticator);
@@ -117,6 +129,18 @@ public class EventSource implements ConnectionHandler, Closeable {
         }
       }
     }
+  }
+
+  private X509TrustManager defaultTrustManager() throws GeneralSecurityException {
+    TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(
+            TrustManagerFactory.getDefaultAlgorithm());
+    trustManagerFactory.init((KeyStore) null);
+    TrustManager[] trustManagers = trustManagerFactory.getTrustManagers();
+    if (trustManagers.length != 1 || !(trustManagers[0] instanceof X509TrustManager)) {
+      throw new IllegalStateException("Unexpected default trust managers:"
+              + Arrays.toString(trustManagers));
+    }
+    return (X509TrustManager) trustManagers[0];
   }
 
   private void connect() {

@@ -39,7 +39,8 @@ public class EventSource implements ConnectionHandler, Closeable {
   static final long MAX_RECONNECT_TIME_MS = 30000;
   private volatile URI uri;
   private final Headers headers;
-  private final ExecutorService executor;
+  private final ExecutorService eventExecutor;
+  private final ExecutorService streamExecutor;
   private volatile long reconnectTimeMs = 0;
   private volatile String lastEventId;
   private final EventHandler handler;
@@ -53,11 +54,15 @@ public class EventSource implements ConnectionHandler, Closeable {
     this.uri = builder.uri;
     this.headers = addDefaultHeaders(builder.headers);
     this.reconnectTimeMs = builder.reconnectTimeMs;
-    ThreadFactory threadFactory = new ThreadFactoryBuilder()
-        .setNameFormat("okhttp-eventsource-%d")
+    ThreadFactory eventsThreadFactory = new ThreadFactoryBuilder()
+        .setNameFormat("okhttp-eventsource-events-%d")
         .build();
-    this.executor = Executors.newSingleThreadExecutor(threadFactory);
-    this.handler = new AsyncEventHandler(this.executor, builder.handler);
+    this.eventExecutor = Executors.newSingleThreadExecutor(eventsThreadFactory);
+    ThreadFactory streamThreadFactory = new ThreadFactoryBuilder()
+        .setNameFormat("okhttp-eventsource-stream-%d")
+        .build();
+    this.streamExecutor = Executors.newSingleThreadExecutor(streamThreadFactory);
+    this.handler = new AsyncEventHandler(this.eventExecutor, builder.handler);
     this.readyState = new AtomicReference<>(RAW);
 
     OkHttpClient.Builder clientBuilder = builder.client.newBuilder()
@@ -88,7 +93,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
     logger.debug("readyState change: " + RAW + " -> " + CONNECTING);
     logger.info("Starting EventSource client using URI: " + uri);
-    executor.execute(new Runnable() {
+    streamExecutor.execute(new Runnable() {
       public void run() {
         connect();
       }
@@ -113,7 +118,8 @@ public class EventSource implements ConnectionHandler, Closeable {
         handler.onError(e);
       }
     }
-    executor.shutdownNow();
+    eventExecutor.shutdownNow();
+    streamExecutor.shutdownNow();
     if (bufferedSource != null) {
       bufferedSource.close();
     }

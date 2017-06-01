@@ -33,10 +33,12 @@ import static com.launchdarkly.eventsource.ReadyState.*;
  * aka EventSource
  */
 public class EventSource implements ConnectionHandler, Closeable {
-  private static final Logger logger = LoggerFactory.getLogger(EventSource.class);
+  private final Logger logger;
 
   private static final long DEFAULT_RECONNECT_TIME_MS = 1000;
   static final long MAX_RECONNECT_TIME_MS = 30000;
+
+  private final String name;
   private volatile URI uri;
   private final Headers headers;
   private final ExecutorService eventExecutor;
@@ -51,15 +53,17 @@ public class EventSource implements ConnectionHandler, Closeable {
   private BufferedSource bufferedSource = null;
 
   EventSource(Builder builder) {
+    this.name = builder.name;
+    this.logger = LoggerFactory.getLogger("okhttp-eventsource-[" + name + "]");
     this.uri = builder.uri;
     this.headers = addDefaultHeaders(builder.headers);
     this.reconnectTimeMs = builder.reconnectTimeMs;
     ThreadFactory eventsThreadFactory = new ThreadFactoryBuilder()
-        .setNameFormat("okhttp-eventsource-events-%d")
+        .setNameFormat("okhttp-eventsource-events-[" + name + "]-%d")
         .build();
     this.eventExecutor = Executors.newSingleThreadExecutor(eventsThreadFactory);
     ThreadFactory streamThreadFactory = new ThreadFactoryBuilder()
-        .setNameFormat("okhttp-eventsource-stream-%d")
+        .setNameFormat("okhttp-eventsource-stream-[" + name + "]-%d")
         .build();
     this.streamExecutor = Executors.newSingleThreadExecutor(streamThreadFactory);
     this.handler = new AsyncEventHandler(this.eventExecutor, builder.handler);
@@ -76,7 +80,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     try {
       clientBuilder.sslSocketFactory(new ModernTLSSocketFactory(), defaultTrustManager());
     } catch (GeneralSecurityException e) {
-        // TLS is not available, so don't set up the socket factory, swallow the exception
+      // TLS is not available, so don't set up the socket factory, swallow the exception
     }
 
     if (builder.proxyAuthenticator != null) {
@@ -139,12 +143,12 @@ public class EventSource implements ConnectionHandler, Closeable {
 
   private X509TrustManager defaultTrustManager() throws GeneralSecurityException {
     TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(
-            TrustManagerFactory.getDefaultAlgorithm());
+        TrustManagerFactory.getDefaultAlgorithm());
     trustManagerFactory.init((KeyStore) null);
     TrustManager[] trustManagers = trustManagerFactory.getTrustManagers();
     if (trustManagers.length != 1 || !(trustManagers[0] instanceof X509TrustManager)) {
       throw new IllegalStateException("Unexpected default trust managers:"
-              + Arrays.toString(trustManagers));
+          + Arrays.toString(trustManagers));
     }
     return (X509TrustManager) trustManagers[0];
   }
@@ -293,6 +297,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   }
 
   public static final class Builder {
+    private String name = "";
     private long reconnectTimeMs = DEFAULT_RECONNECT_TIME_MS;
     private final URI uri;
     private final EventHandler handler;
@@ -304,6 +309,20 @@ public class EventSource implements ConnectionHandler, Closeable {
     public Builder(EventHandler handler, URI uri) {
       this.uri = uri;
       this.handler = handler;
+    }
+
+    /**
+     * Set the name for this EventSource client to be used when naming the logger and threadpools. This is mainly useful when
+     * multiple EventSource clients exist within the same process.
+     *
+     * @param name the name (without any whitespaces)
+     * @return the builder
+     */
+    public Builder name(String name) {
+      if (name != null) {
+        this.name = name;
+      }
+      return this;
     }
 
     /**

@@ -2,6 +2,7 @@ apply plugin: 'java'
 apply plugin: 'maven'
 apply plugin: 'signing'
 apply plugin: 'idea'
+apply plugin: 'io.codearte.nexus-staging'
 
 repositories {
     mavenLocal()
@@ -12,7 +13,7 @@ repositories {
 
 allprojects {
     group = 'com.launchdarkly'
-    version = "1.4.0"
+    version = "${version}"
     sourceCompatibility = 1.7
     targetCompatibility = 1.7
 }
@@ -40,6 +41,9 @@ buildscript {
     repositories {
         mavenCentral()
         mavenLocal()
+    }
+    dependencies {
+        classpath "io.codearte.gradle.nexus:gradle-nexus-staging-plugin:0.8.0"
     }
 }
 
@@ -76,6 +80,10 @@ idea {
         downloadJavadoc = true
         downloadSources = true
     }
+}
+
+nexusStaging {
+    packageGroup = "com.launchdarkly"
 }
 
 uploadArchives {

@@ -37,6 +37,7 @@ public class EventSource implements ConnectionHandler, Closeable {
 
   private static final long DEFAULT_RECONNECT_TIME_MS = 1000;
   static final long MAX_RECONNECT_TIME_MS = 30000;
+  private static final long DEFAULT_CONNECT_TIMEOUT_MS = 10000;
 
   private final String name;
   private volatile URI uri;
@@ -73,7 +74,6 @@ public class EventSource implements ConnectionHandler, Closeable {
         .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
         .readTimeout(0, TimeUnit.SECONDS)
         .writeTimeout(0, TimeUnit.SECONDS)
-        .connectTimeout(0, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .proxy(builder.proxy);
 
@@ -304,7 +304,9 @@ public class EventSource implements ConnectionHandler, Closeable {
     private Headers headers = Headers.of();
     private Proxy proxy;
     private Authenticator proxyAuthenticator = null;
-    private OkHttpClient client = new OkHttpClient();
+    private OkHttpClient client = new OkHttpClient.Builder()
+        .connectTimeout(DEFAULT_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        .build();
 
     public Builder(EventHandler handler, URI uri) {
       this.uri = uri;

@@ -53,7 +53,6 @@ public class EventSource implements ConnectionHandler, Closeable {
   private final OkHttpClient client;
   private volatile Call call;
   private final Random jitter = new Random();
-  private BufferedSource bufferedSource = null;
 
   EventSource(Builder builder) {
     this.name = builder.name;
@@ -108,9 +107,6 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
     eventExecutor.shutdownNow();
     streamExecutor.shutdownNow();
-    if (bufferedSource != null) {
-      bufferedSource.close();
-    }
 
     if (client != null) {
       if (client.connectionPool() != null) {
@@ -127,6 +123,8 @@ public class EventSource implements ConnectionHandler, Closeable {
 
   private void connect() {
     Response response = null;
+    BufferedSource bufferedSource = null;
+
     int reconnectAttempts = 0;
     try {
       while (!Thread.currentThread().isInterrupted() && readyState.get() != SHUTDOWN) {
@@ -184,6 +182,13 @@ public class EventSource implements ConnectionHandler, Closeable {
           }
           if (call != null) {
             call.cancel();
+          }
+          if (bufferedSource != null) {
+            try {
+              bufferedSource.close();
+            } catch (IOException e) {
+              logger.warn("Exception when closing bufferedSource", e);
+            }
           }
           if (currentState == ReadyState.OPEN) {
             try {

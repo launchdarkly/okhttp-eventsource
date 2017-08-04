@@ -37,6 +37,9 @@ public class EventSource implements ConnectionHandler, Closeable {
 
   private static final long DEFAULT_RECONNECT_TIME_MS = 1000;
   static final long MAX_RECONNECT_TIME_MS = 30000;
+  static final int DEFAULT_CONNECT_TIMEOUT_MS = 10000;
+  static final int DEFAULT_WRITE_TIMEOUT_MS = 5000;
+  static final int DEFAULT_READ_TIMEOUT_MS = 1000 * 60 * 5;
 
   private final String name;
   private volatile URI uri;
@@ -50,7 +53,6 @@ public class EventSource implements ConnectionHandler, Closeable {
   private final OkHttpClient client;
   private volatile Call call;
   private final Random jitter = new Random();
-  private BufferedSource bufferedSource = null;
 
   EventSource(Builder builder) {
     this.name = builder.name;
@@ -68,26 +70,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     this.streamExecutor = Executors.newSingleThreadExecutor(streamThreadFactory);
     this.handler = new AsyncEventHandler(this.eventExecutor, builder.handler);
     this.readyState = new AtomicReference<>(RAW);
-
-    OkHttpClient.Builder clientBuilder = builder.client.newBuilder()
-        .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
-        .readTimeout(0, TimeUnit.SECONDS)
-        .writeTimeout(0, TimeUnit.SECONDS)
-        .connectTimeout(0, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
-        .proxy(builder.proxy);
-
-    try {
-      clientBuilder.sslSocketFactory(new ModernTLSSocketFactory(), defaultTrustManager());
-    } catch (GeneralSecurityException e) {
-      // TLS is not available, so don't set up the socket factory, swallow the exception
-    }
-
-    if (builder.proxyAuthenticator != null) {
-      clientBuilder.proxyAuthenticator(builder.proxyAuthenticator);
-    }
-
-    this.client = clientBuilder.build();
+    this.client = builder.clientBuilder.build();
   }
 
   public void start() {
@@ -124,9 +107,6 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
     eventExecutor.shutdownNow();
     streamExecutor.shutdownNow();
-    if (bufferedSource != null) {
-      bufferedSource.close();
-    }
 
     if (client != null) {
       if (client.connectionPool() != null) {
@@ -141,20 +121,10 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
   }
 
-  private X509TrustManager defaultTrustManager() throws GeneralSecurityException {
-    TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(
-        TrustManagerFactory.getDefaultAlgorithm());
-    trustManagerFactory.init((KeyStore) null);
-    TrustManager[] trustManagers = trustManagerFactory.getTrustManagers();
-    if (trustManagers.length != 1 || !(trustManagers[0] instanceof X509TrustManager)) {
-      throw new IllegalStateException("Unexpected default trust managers:"
-          + Arrays.toString(trustManagers));
-    }
-    return (X509TrustManager) trustManagers[0];
-  }
-
   private void connect() {
     Response response = null;
+    BufferedSource bufferedSource = null;
+
     int reconnectAttempts = 0;
     try {
       while (!Thread.currentThread().isInterrupted() && readyState.get() != SHUTDOWN) {
@@ -212,6 +182,13 @@ public class EventSource implements ConnectionHandler, Closeable {
           }
           if (call != null) {
             call.cancel();
+          }
+          if (bufferedSource != null) {
+            try {
+              bufferedSource.close();
+            } catch (IOException e) {
+              logger.warn("Exception when closing bufferedSource", e);
+            }
           }
           if (currentState == ReadyState.OPEN) {
             try {
@@ -304,7 +281,12 @@ public class EventSource implements ConnectionHandler, Closeable {
     private Headers headers = Headers.of();
     private Proxy proxy;
     private Authenticator proxyAuthenticator = null;
-    private OkHttpClient client = new OkHttpClient();
+    private OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
+        .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
+        .connectTimeout(DEFAULT_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        .readTimeout(DEFAULT_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        .writeTimeout(DEFAULT_WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        .retryOnConnectionFailure(true);
 
     public Builder(EventHandler handler, URI uri) {
       this.uri = uri;
@@ -349,13 +331,15 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
 
     /**
-     * Set a custom HTTP client that will be used to make the EventSource connection
+     * Set a custom HTTP client that will be used to make the EventSource connection.
+     * If you're setting this along with other connection-related items (ie timeouts, proxy),
+     * you should do this first to avoid overwriting values.
      *
      * @param client the HTTP client
      * @return the builder
      */
     public Builder client(OkHttpClient client) {
-      this.client = client;
+      this.clientBuilder = client.newBuilder();
       return this;
     }
 
@@ -393,8 +377,71 @@ public class EventSource implements ConnectionHandler, Closeable {
       return this;
     }
 
+    /**
+     * Sets the connect timeout in milliseconds if needed. Defaults to {@value #DEFAULT_CONNECT_TIMEOUT_MS}
+     *
+     * @param connectTimeoutMs
+     * @return
+     */
+    public Builder connectTimeoutMs(int connectTimeoutMs) {
+      this.clientBuilder.connectTimeout(connectTimeoutMs, TimeUnit.MILLISECONDS);
+      return this;
+    }
+
+    /**
+     * Sets the write timeout in milliseconds if needed. Defaults to {@value #DEFAULT_WRITE_TIMEOUT_MS}
+     *
+     * @param writeTimeoutMs
+     * @return
+     */
+    public Builder writeTimeoutMs(int writeTimeoutMs) {
+      this.clientBuilder.writeTimeout(writeTimeoutMs, TimeUnit.MILLISECONDS);
+      return this;
+    }
+
+    /**
+     * Sets the read timeout in milliseconds if needed. Defaults to {@value #DEFAULT_READ_TIMEOUT_MS}
+     *
+     * @param readTimeoutMs
+     * @return
+     */
+    public Builder readTimeoutMs(int readTimeoutMs) {
+      this.clientBuilder.readTimeout(readTimeoutMs, TimeUnit.MILLISECONDS);
+      return this;
+    }
+
     public EventSource build() {
+      if (proxy != null) {
+        clientBuilder.proxy(proxy);
+      }
+
+      try {
+        clientBuilder.sslSocketFactory(new ModernTLSSocketFactory(), defaultTrustManager());
+      } catch (GeneralSecurityException e) {
+        // TLS is not available, so don't set up the socket factory, swallow the exception
+      }
+
+      if (proxyAuthenticator != null) {
+        clientBuilder.proxyAuthenticator(proxyAuthenticator);
+      }
+
       return new EventSource(this);
+    }
+
+    protected OkHttpClient.Builder getClientBuilder() {
+      return clientBuilder;
+    }
+
+    private static X509TrustManager defaultTrustManager() throws GeneralSecurityException {
+      TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(
+          TrustManagerFactory.getDefaultAlgorithm());
+      trustManagerFactory.init((KeyStore) null);
+      TrustManager[] trustManagers = trustManagerFactory.getTrustManagers();
+      if (trustManagers.length != 1 || !(trustManagers[0] instanceof X509TrustManager)) {
+        throw new IllegalStateException("Unexpected default trust managers:"
+            + Arrays.toString(trustManagers));
+      }
+      return (X509TrustManager) trustManagers[0];
     }
   }
 }

@@ -62,16 +62,16 @@ public class EventSource implements ConnectionHandler, Closeable {
     this.uri = builder.uri;
     this.headers = addDefaultHeaders(builder.headers);
     this.reconnectTimeMs = builder.reconnectTimeMs;
-    ThreadFactory eventsThreadFactory = createThreadFactory();
+    ThreadFactory eventsThreadFactory = createThreadFactory("okhttp-eventsource-events");
     this.eventExecutor = Executors.newSingleThreadExecutor(eventsThreadFactory);
-    ThreadFactory streamThreadFactory = createThreadFactory();
+    ThreadFactory streamThreadFactory = createThreadFactory("okhttp-eventsource-stream");
     this.streamExecutor = Executors.newSingleThreadExecutor(streamThreadFactory);
     this.handler = new AsyncEventHandler(this.eventExecutor, builder.handler);
     this.readyState = new AtomicReference<>(RAW);
     this.client = builder.clientBuilder.build();
   }
 
-  private ThreadFactory createThreadFactory() {
+  private ThreadFactory createThreadFactory(final String type) {
     final ThreadFactory backingThreadFactory =
             Executors.defaultThreadFactory();
     final AtomicLong count = new AtomicLong(0);
@@ -79,7 +79,7 @@ public class EventSource implements ConnectionHandler, Closeable {
       @Override
       public Thread newThread(Runnable runnable) {
         Thread thread = backingThreadFactory.newThread(runnable);
-        thread.setName(format(Locale.ROOT, "okhttp-eventsource-stream-[" + name + "]-%d", count.getAndIncrement()));
+        thread.setName(format(Locale.ROOT, "%s-[%s]-%d", type, name, count.getAndIncrement()));
         return thread;
       }
     };

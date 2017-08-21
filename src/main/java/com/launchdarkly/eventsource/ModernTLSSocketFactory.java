@@ -1,7 +1,5 @@
 package com.launchdarkly.eventsource;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
@@ -74,7 +72,6 @@ public class ModernTLSSocketFactory extends SSLSocketFactory {
    * @param s the socket
    * @return
    */
-  @VisibleForTesting
   static Socket setModernTlsVersionsOnSocket(Socket s) {
     if (s != null && (s instanceof SSLSocket)) {
       List<String> defaultEnabledProtocols = Arrays.asList(((SSLSocket) s).getSupportedProtocols());

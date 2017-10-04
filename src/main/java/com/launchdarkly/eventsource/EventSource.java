@@ -3,12 +3,14 @@ package com.launchdarkly.eventsource;
 import okhttp3.*;
 import okio.BufferedSource;
 import okio.Okio;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
+
 import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
@@ -55,6 +57,8 @@ public class EventSource implements ConnectionHandler, Closeable {
   private final OkHttpClient client;
   private volatile Call call;
   private final Random jitter = new Random();
+  private Response response;
+  private BufferedSource bufferedSource;
 
   EventSource(Builder builder) {
     this.name = builder.name;
@@ -73,7 +77,7 @@ public class EventSource implements ConnectionHandler, Closeable {
 
   private ThreadFactory createThreadFactory(final String type) {
     final ThreadFactory backingThreadFactory =
-            Executors.defaultThreadFactory();
+        Executors.defaultThreadFactory();
     final AtomicLong count = new AtomicLong(0);
     return new ThreadFactory() {
       @Override
@@ -104,7 +108,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   }
 
   @Override
-  public void close() throws IOException {
+  public void close() {
     ReadyState currentState = readyState.getAndSet(SHUTDOWN);
     logger.debug("readyState change: " + currentState + " -> " + SHUTDOWN);
     if (currentState == SHUTDOWN) {
@@ -117,6 +121,15 @@ public class EventSource implements ConnectionHandler, Closeable {
         handler.onError(e);
       }
     }
+
+    if (call != null) {
+      // The call.cancel() must precede the bufferedSource.close().
+      // Otherwise, an IllegalArgumentException "Unbalanced enter/exit" error is thrown by okhttp.
+      // https://github.com/google/ExoPlayer/issues/1348
+      call.cancel();
+      logger.debug("call cancelled");
+    }
+
     eventExecutor.shutdownNow();
     streamExecutor.shutdownNow();
 
@@ -134,8 +147,8 @@ public class EventSource implements ConnectionHandler, Closeable {
   }
 
   private void connect() {
-    Response response = null;
-    BufferedSource bufferedSource = null;
+    response = null;
+    bufferedSource = null;
 
     int reconnectAttempts = 0;
     try {
@@ -189,19 +202,21 @@ public class EventSource implements ConnectionHandler, Closeable {
         } finally {
           currentState = readyState.getAndSet(CLOSED);
           logger.debug("readyState change: " + currentState + " -> " + CLOSED);
+
           if (response != null && response.body() != null) {
-            response.body().close();
+            response.close();
+            logger.debug("response closed");
           }
-          if (call != null) {
-            call.cancel();
-          }
+
           if (bufferedSource != null) {
             try {
               bufferedSource.close();
+              logger.debug("buffered source closed");
             } catch (IOException e) {
               logger.warn("Exception when closing bufferedSource", e);
             }
           }
+
           if (currentState == ReadyState.OPEN) {
             try {
               handler.onClosed();
@@ -212,6 +227,10 @@ public class EventSource implements ConnectionHandler, Closeable {
         }
       }
     } catch (RejectedExecutionException ignored) {
+      call = null;
+      response = null;
+      bufferedSource = null;
+      logger.debug("Rejected execution exception ignored: ", ignored);
       // During shutdown, we tried to send a message to the event handler
       // Do not reconnect; the executor has been shut down
     }

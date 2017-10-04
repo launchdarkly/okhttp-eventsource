@@ -7,9 +7,11 @@
 *.ipr
 *.iws
 .idea/
+local.properties
  
 #Gradle
 .gradletasknamecache
 .gradle/
 build/
 bin/
+

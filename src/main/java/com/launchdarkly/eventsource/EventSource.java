@@ -158,9 +158,9 @@ public class EventSource implements ConnectionHandler, Closeable {
         logger.debug("readyState change: " + currentState + " -> " + CONNECTING);
         try {
           Request.Builder builder = new Request.Builder()
-              .headers(headers)
-              .url(uri.toASCIIString())
-              .get();
+                  .headers(headers)
+                  .url(uri.toASCIIString())
+                  .get();
 
           if (lastEventId != null && !lastEventId.isEmpty()) {
             builder.addHeader("Last-Event-ID", lastEventId);
@@ -313,11 +313,11 @@ public class EventSource implements ConnectionHandler, Closeable {
     private Proxy proxy;
     private Authenticator proxyAuthenticator = null;
     private OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
-        .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
-        .connectTimeout(DEFAULT_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        .readTimeout(DEFAULT_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        .writeTimeout(DEFAULT_WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        .retryOnConnectionFailure(true);
+            .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
+            .connectTimeout(DEFAULT_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .readTimeout(DEFAULT_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .writeTimeout(DEFAULT_WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .retryOnConnectionFailure(true);
 
     public Builder(EventHandler handler, URI uri) {
       this.uri = uri;
@@ -465,12 +465,12 @@ public class EventSource implements ConnectionHandler, Closeable {
 
     private static X509TrustManager defaultTrustManager() throws GeneralSecurityException {
       TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(
-          TrustManagerFactory.getDefaultAlgorithm());
+              TrustManagerFactory.getDefaultAlgorithm());
       trustManagerFactory.init((KeyStore) null);
       TrustManager[] trustManagers = trustManagerFactory.getTrustManagers();
       if (trustManagers.length != 1 || !(trustManagers[0] instanceof X509TrustManager)) {
         throw new IllegalStateException("Unexpected default trust managers:"
-            + Arrays.toString(trustManagers));
+                + Arrays.toString(trustManagers));
       }
       return (X509TrustManager) trustManagers[0];
     }

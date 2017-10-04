@@ -55,6 +55,8 @@ public class EventSource implements ConnectionHandler, Closeable {
   private final OkHttpClient client;
   private volatile Call call;
   private final Random jitter = new Random();
+  private Response response;
+  private BufferedSource bufferedSource;
 
   EventSource(Builder builder) {
     this.name = builder.name;
@@ -104,7 +106,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   }
 
   @Override
-  public void close() throws IOException {
+  public void close() {
     ReadyState currentState = readyState.getAndSet(SHUTDOWN);
     logger.debug("readyState change: " + currentState + " -> " + SHUTDOWN);
     if (currentState == SHUTDOWN) {
@@ -117,6 +119,15 @@ public class EventSource implements ConnectionHandler, Closeable {
         handler.onError(e);
       }
     }
+
+    if (call != null) {
+      // The call.cancel() must precede the bufferedSource.close().
+      // Otherwise, an IllegalArgumentException "Unbalanced enter/exit" error is thrown by okhttp.
+      // https://github.com/google/ExoPlayer/issues/1348
+      call.cancel();
+      logger.debug("call cancelled");
+    }
+
     eventExecutor.shutdownNow();
     streamExecutor.shutdownNow();
 
@@ -134,8 +145,8 @@ public class EventSource implements ConnectionHandler, Closeable {
   }
 
   private void connect() {
-    Response response = null;
-    BufferedSource bufferedSource = null;
+    response = null;
+    bufferedSource = null;
 
     int reconnectAttempts = 0;
     try {
@@ -145,9 +156,9 @@ public class EventSource implements ConnectionHandler, Closeable {
         logger.debug("readyState change: " + currentState + " -> " + CONNECTING);
         try {
           Request.Builder builder = new Request.Builder()
-              .headers(headers)
-              .url(uri.toASCIIString())
-              .get();
+                  .headers(headers)
+                  .url(uri.toASCIIString())
+                  .get();
 
           if (lastEventId != null && !lastEventId.isEmpty()) {
             builder.addHeader("Last-Event-ID", lastEventId);
@@ -189,19 +200,21 @@ public class EventSource implements ConnectionHandler, Closeable {
         } finally {
           currentState = readyState.getAndSet(CLOSED);
           logger.debug("readyState change: " + currentState + " -> " + CLOSED);
+
           if (response != null && response.body() != null) {
-            response.body().close();
+            response.close();
+            logger.debug("response closed");
           }
-          if (call != null) {
-            call.cancel();
-          }
+
           if (bufferedSource != null) {
             try {
               bufferedSource.close();
+              logger.debug("buffered source closed");
             } catch (IOException e) {
               logger.warn("Exception when closing bufferedSource", e);
             }
           }
+
           if (currentState == ReadyState.OPEN) {
             try {
               handler.onClosed();
@@ -212,6 +225,10 @@ public class EventSource implements ConnectionHandler, Closeable {
         }
       }
     } catch (RejectedExecutionException ignored) {
+      call = null;
+      response = null;
+      bufferedSource = null;
+      logger.debug("Rejected execution exception ignored: ", ignored);
       // During shutdown, we tried to send a message to the event handler
       // Do not reconnect; the executor has been shut down
     }
@@ -294,11 +311,11 @@ public class EventSource implements ConnectionHandler, Closeable {
     private Proxy proxy;
     private Authenticator proxyAuthenticator = null;
     private OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
-        .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
-        .connectTimeout(DEFAULT_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        .readTimeout(DEFAULT_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        .writeTimeout(DEFAULT_WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        .retryOnConnectionFailure(true);
+            .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
+            .connectTimeout(DEFAULT_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .readTimeout(DEFAULT_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .writeTimeout(DEFAULT_WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .retryOnConnectionFailure(true);
 
     public Builder(EventHandler handler, URI uri) {
       this.uri = uri;
@@ -446,12 +463,12 @@ public class EventSource implements ConnectionHandler, Closeable {
 
     private static X509TrustManager defaultTrustManager() throws GeneralSecurityException {
       TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(
-          TrustManagerFactory.getDefaultAlgorithm());
+              TrustManagerFactory.getDefaultAlgorithm());
       trustManagerFactory.init((KeyStore) null);
       TrustManager[] trustManagers = trustManagerFactory.getTrustManagers();
       if (trustManagers.length != 1 || !(trustManagers[0] instanceof X509TrustManager)) {
         throw new IllegalStateException("Unexpected default trust managers:"
-            + Arrays.toString(trustManagers));
+                + Arrays.toString(trustManagers));
       }
       return (X509TrustManager) trustManagers[0];
     }

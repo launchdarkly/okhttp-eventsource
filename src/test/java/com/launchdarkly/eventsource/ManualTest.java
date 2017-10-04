@@ -40,11 +40,7 @@ public class ManualTest {
     logger.warn("Sleeping...");
     Thread.sleep(10000L);
     logger.debug("Stopping source");
-    try {
-      source.close();
-    } catch (IOException e) {
-      e.printStackTrace();
-    }
+    source.close();
     logger.debug("Stopped");
   }
 }

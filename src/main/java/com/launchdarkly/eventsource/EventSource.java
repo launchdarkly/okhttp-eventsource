@@ -16,6 +16,7 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
+import java.net.SocketTimeoutException;
 import java.net.Proxy.Type;
 import java.net.URI;
 import java.security.GeneralSecurityException;
@@ -157,6 +158,8 @@ public class EventSource implements ConnectionHandler, Closeable {
     
     try {
       while (!Thread.currentThread().isInterrupted() && readyState.get() != SHUTDOWN) {
+        boolean gotResponse = false, timedOut = false;
+
         maybeWaitWithBackoff(reconnectAttempts++);
         ReadyState currentState = readyState.getAndSet(CONNECTING);
         logger.debug("readyState change: " + currentState + " -> " + CONNECTING);
@@ -173,7 +176,7 @@ public class EventSource implements ConnectionHandler, Closeable {
           call = client.newCall(builder.build());
           response = call.execute();
           if (response.isSuccessful()) {
-            reconnectAttempts = 0;
+            gotResponse = true;
             currentState = readyState.getAndSet(OPEN);
             if (currentState != CONNECTING) {
               logger.warn("Unexpected readyState change: " + currentState + " -> " + OPEN);
@@ -203,6 +206,9 @@ public class EventSource implements ConnectionHandler, Closeable {
         } catch (IOException ioe) {
           logger.debug("Connection problem.", ioe);
           errorHandlerAction = dispatchError(ioe);
+          if (ioe instanceof SocketTimeoutException) {
+            timedOut = true;
+          }
         } finally {
           ReadyState nextState = CLOSED;
           if (errorHandlerAction == ConnectionErrorHandler.Action.SHUTDOWN) {
@@ -232,6 +238,10 @@ public class EventSource implements ConnectionHandler, Closeable {
             } catch (Exception e) {
               handler.onError(e);
             }
+          }
+          // reset the backoff if we had a successful connection that was dropped for non-timeout reasons
+          if (gotResponse && !timedOut) {
+            reconnectAttempts = 0;
           }
         }
       }
@@ -449,7 +459,8 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
 
     /**
-     * Sets the read timeout in milliseconds if needed. Defaults to {@value #DEFAULT_READ_TIMEOUT_MS}
+     * Sets the read timeout in milliseconds if needed. If a read timeout happens, the {@code EventSource}
+     * will restart the connection. Defaults to {@value #DEFAULT_READ_TIMEOUT_MS}
      *
      * @param readTimeoutMs
      * @return

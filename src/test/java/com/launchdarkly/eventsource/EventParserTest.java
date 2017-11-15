@@ -136,4 +136,13 @@ public class EventParserTest {
     verify(eventHandler).onMessage(eq("message"), eq(new MessageEvent("{\"foo\": \"bar baz\"}", null, ORIGIN)));
     verifyNoMoreInteractions(eventHandler);
   }
+
+  @Test
+  public void dispatchesEmptyData() throws Exception {
+    parser.line("data:");
+    parser.line("");
+
+    verify(eventHandler).onMessage(eq("message"), eq(new MessageEvent("", null, ORIGIN)));
+    verifyNoMoreInteractions(eventHandler);
+  }
 }

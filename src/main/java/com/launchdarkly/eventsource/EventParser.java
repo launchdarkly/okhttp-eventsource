@@ -44,7 +44,7 @@ public class EventParser {
     } else if ((colonIndex = line.indexOf(":")) != -1) {
       String field = line.substring(0, colonIndex);
       String value = line.substring(colonIndex + 1);
-      if (value.charAt(0)==' ') {
+      if (!value.isEmpty() && value.charAt(0) == ' ') {
         value = value.replaceFirst(" ", EMPTY_STRING);
       }
       processField(field, value);

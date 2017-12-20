@@ -53,6 +53,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   private volatile long reconnectTimeMs = 0;
   private volatile String lastEventId;
   private final EventHandler handler;
+  private final ConnectionErrorHandler connectionErrorHandler;
   private final AtomicReference<ReadyState> readyState;
   private final OkHttpClient client;
   private volatile Call call;
@@ -71,6 +72,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     ThreadFactory streamThreadFactory = createThreadFactory("okhttp-eventsource-stream");
     this.streamExecutor = Executors.newSingleThreadExecutor(streamThreadFactory);
     this.handler = new AsyncEventHandler(this.eventExecutor, builder.handler);
+    this.connectionErrorHandler = builder.connectionErrorHandler;
     this.readyState = new AtomicReference<>(RAW);
     this.client = builder.clientBuilder.build();
   }
@@ -151,6 +153,8 @@ public class EventSource implements ConnectionHandler, Closeable {
     bufferedSource = null;
 
     int reconnectAttempts = 0;
+    ConnectionErrorHandler.Action errorHandlerAction = null;
+    
     try {
       while (!Thread.currentThread().isInterrupted() && readyState.get() != SHUTDOWN) {
         maybeWaitWithBackoff(reconnectAttempts++);
@@ -192,16 +196,21 @@ public class EventSource implements ConnectionHandler, Closeable {
             }
           } else {
             logger.debug("Unsuccessful Response: " + response);
-            handler.onError(new UnsuccessfulResponseException(response.code()));
+            errorHandlerAction = dispatchError(new UnsuccessfulResponseException(response.code()));
           }
         } catch (EOFException eofe) {
           logger.warn("Connection unexpectedly closed.");
         } catch (IOException ioe) {
           logger.debug("Connection problem.", ioe);
-          handler.onError(ioe);
+          errorHandlerAction = dispatchError(ioe);
         } finally {
-          currentState = readyState.getAndSet(CLOSED);
-          logger.debug("readyState change: " + currentState + " -> " + CLOSED);
+          ReadyState nextState = CLOSED;
+          if (errorHandlerAction == ConnectionErrorHandler.Action.SHUTDOWN) {
+            logger.info("Connection has been explicitly shut down by error handler");
+            nextState = SHUTDOWN;
+          }
+          currentState = readyState.getAndSet(nextState);
+          logger.debug("readyState change: " + currentState + " -> " + nextState);
 
           if (response != null && response.body() != null) {
             response.close();
@@ -236,6 +245,14 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
   }
 
+  private ConnectionErrorHandler.Action dispatchError(Throwable t) {
+    ConnectionErrorHandler.Action action = connectionErrorHandler.onConnectionError(t);
+    if (action != ConnectionErrorHandler.Action.SHUTDOWN) {
+      handler.onError(t);
+    }
+    return action;
+  }
+  
   private void maybeWaitWithBackoff(int reconnectAttempts) {
     if (reconnectTimeMs > 0 && reconnectAttempts > 0) {
       try {
@@ -309,6 +326,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     private long reconnectTimeMs = DEFAULT_RECONNECT_TIME_MS;
     private final URI uri;
     private final EventHandler handler;
+    private ConnectionErrorHandler connectionErrorHandler = ConnectionErrorHandler.DEFAULT;
     private Headers headers = Headers.of();
     private Proxy proxy;
     private Authenticator proxyAuthenticator = null;
@@ -438,6 +456,19 @@ public class EventSource implements ConnectionHandler, Closeable {
      */
     public Builder readTimeoutMs(int readTimeoutMs) {
       this.clientBuilder.readTimeout(readTimeoutMs, TimeUnit.MILLISECONDS);
+      return this;
+    }
+
+    /**
+     * Sets the {@link ConnectionErrorHandler} that should process connection errors.
+     *
+     * @param connectionErrorHandler
+     * @return
+     */
+    public Builder connectionErrorHandler(ConnectionErrorHandler handler) {
+      if (handler != null) {
+        this.connectionErrorHandler = handler;
+      }
       return this;
     }
 

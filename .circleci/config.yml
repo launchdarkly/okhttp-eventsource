@@ -1,0 +1,10 @@
+version: 2
+jobs:
+   build:
+     docker:
+       - image: circleci/openjdk:8
+     environment:
+       - TERM: dumb
+     steps:
+       - checkout
+       - run: ./gradlew test sourcesJar javadocJar

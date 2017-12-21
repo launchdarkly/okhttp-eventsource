@@ -473,7 +473,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     /**
      * Sets the {@link ConnectionErrorHandler} that should process connection errors.
      *
-     * @param connectionErrorHandler
+     * @param handler
      * @return
      */
     public Builder connectionErrorHandler(ConnectionErrorHandler handler) {

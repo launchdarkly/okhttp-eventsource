@@ -118,4 +118,31 @@ public class EventParserTest {
     verify(eventHandler).onMessage(eq("message"), eq(new MessageEvent("hello", "reused", ORIGIN)));
     verify(eventHandler).onMessage(eq("message"), eq(new MessageEvent("world", "reused", ORIGIN)));
   }
+
+  @Test
+  public void filtersOutFirstSpace() throws Exception {
+    parser.line("data: {\"foo\": \"bar baz\"}");
+    parser.line("");
+
+    verify(eventHandler).onMessage(eq("message"), eq(new MessageEvent("{\"foo\": \"bar baz\"}", null, ORIGIN)));
+    verifyNoMoreInteractions(eventHandler);
+  }
+
+  @Test
+  public void keepsDataIntact() throws Exception {
+    parser.line("data:{\"foo\": \"bar baz\"}");
+    parser.line("");
+
+    verify(eventHandler).onMessage(eq("message"), eq(new MessageEvent("{\"foo\": \"bar baz\"}", null, ORIGIN)));
+    verifyNoMoreInteractions(eventHandler);
+  }
+
+  @Test
+  public void dispatchesEmptyData() throws Exception {
+    parser.line("data:");
+    parser.line("");
+
+    verify(eventHandler).onMessage(eq("message"), eq(new MessageEvent("", null, ORIGIN)));
+    verifyNoMoreInteractions(eventHandler);
+  }
 }

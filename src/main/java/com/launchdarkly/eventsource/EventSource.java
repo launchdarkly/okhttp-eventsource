@@ -7,6 +7,7 @@ import okio.Okio;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
@@ -49,6 +50,8 @@ public class EventSource implements ConnectionHandler, Closeable {
   private final String name;
   private volatile URI uri;
   private final Headers headers;
+  private final String method;
+  @Nullable private final RequestBody body;
   private final ExecutorService eventExecutor;
   private final ExecutorService streamExecutor;
   private volatile long reconnectTimeMs = 0;
@@ -67,6 +70,8 @@ public class EventSource implements ConnectionHandler, Closeable {
     this.logger = LoggerFactory.getLogger("okhttp-eventsource-[" + name + "]");
     this.uri = builder.uri;
     this.headers = addDefaultHeaders(builder.headers);
+    this.method = builder.method;
+    this.body = builder.body;
     this.reconnectTimeMs = builder.reconnectTimeMs;
     ThreadFactory eventsThreadFactory = createThreadFactory("okhttp-eventsource-events");
     this.eventExecutor = Executors.newSingleThreadExecutor(eventsThreadFactory);
@@ -148,6 +153,17 @@ public class EventSource implements ConnectionHandler, Closeable {
       }
     }
   }
+  Request buildRequest() {
+    Request.Builder builder = new Request.Builder()
+        .headers(headers)
+        .url(uri.toASCIIString())
+        .method(method, body);
+
+    if (lastEventId != null && !lastEventId.isEmpty()) {
+      builder.addHeader("Last-Event-ID", lastEventId);
+    }
+    return builder.build();
+  }
 
   private void connect() {
     response = null;
@@ -164,16 +180,7 @@ public class EventSource implements ConnectionHandler, Closeable {
         ReadyState currentState = readyState.getAndSet(CONNECTING);
         logger.debug("readyState change: " + currentState + " -> " + CONNECTING);
         try {
-          Request.Builder builder = new Request.Builder()
-                  .headers(headers)
-                  .url(uri.toASCIIString())
-                  .get();
-
-          if (lastEventId != null && !lastEventId.isEmpty()) {
-            builder.addHeader("Last-Event-ID", lastEventId);
-          }
-
-          call = client.newCall(builder.build());
+          call = client.newCall(buildRequest());
           response = call.execute();
           if (response.isSuccessful()) {
             gotResponse = true;
@@ -340,6 +347,8 @@ public class EventSource implements ConnectionHandler, Closeable {
     private Headers headers = Headers.of();
     private Proxy proxy;
     private Authenticator proxyAuthenticator = null;
+    private String method = "GET";
+    @Nullable private RequestBody body = null;
     private OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
             .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
             .connectTimeout(DEFAULT_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
@@ -350,6 +359,31 @@ public class EventSource implements ConnectionHandler, Closeable {
     public Builder(EventHandler handler, URI uri) {
       this.uri = uri;
       this.handler = handler;
+    }
+
+    /**
+     * Set the HTTP method used for this EventSource client to use for requests to establish the EventSource.
+     *
+     * Defaults to "GET".
+     *
+     * @param method the HTTP method name
+     * @return the builder
+     */
+    public Builder method(String method) {
+      if (method != null && method.length() > 0) {
+        this.method = method.toUpperCase();
+      }
+      return this;
+    }
+
+    /**
+     * Sets the request body to be used for this EventSource client to use for requests to establish the EventSource.
+     * @param body the body to use in HTTP requests
+     * @return the builder
+     */
+    public Builder body(@Nullable RequestBody body) {
+      this.body = body;
+      return this;
     }
 
     /**

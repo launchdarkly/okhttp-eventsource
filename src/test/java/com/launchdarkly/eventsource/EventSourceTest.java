@@ -1,13 +1,19 @@
 package com.launchdarkly.eventsource;
 
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okio.Buffer;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
 
+import java.io.IOException;
 import java.net.Proxy;
 import java.net.URI;
+import java.nio.charset.Charset;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
@@ -89,5 +95,32 @@ public class EventSourceTest {
     assertEquals(connectTimeout, client.connectTimeoutMillis());
     assertEquals(readTimeout, client.readTimeoutMillis());
     assertEquals(writeTimeout, client.writeTimeoutMillis());
+  }
+
+  @Test
+  public void customMethod() throws IOException {
+    builder.method("report");
+    builder.body(RequestBody.create(MediaType.parse("text/plain; charset=utf-8"), "hello world"));
+    Request req = builder.build().buildRequest();
+    assertEquals("REPORT", req.method());
+    assertEquals(MediaType.parse("text/plain; charset=utf-8"), req.body().contentType());
+    Buffer actualBody = new Buffer();
+    req.body().writeTo(actualBody);
+    assertEquals("hello world", actualBody.readString(Charset.forName("utf-8")));
+
+    // ensure we can build multiple requests:
+    req = builder.build().buildRequest();
+    assertEquals("REPORT", req.method());
+    assertEquals(MediaType.parse("text/plain; charset=utf-8"), req.body().contentType());
+    actualBody = new Buffer();
+    req.body().writeTo(actualBody);
+    assertEquals("hello world", actualBody.readString(Charset.forName("utf-8")));
+  }
+
+  @Test
+  public void defaultMethod() {
+    Request req = builder.build().buildRequest();
+    assertEquals("GET", req.method());
+    assertEquals(null, req.body());
   }
 }

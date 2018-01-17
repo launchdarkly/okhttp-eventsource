@@ -1,6 +1,9 @@
 # okhttp-eventsource
 Java EventSource implementation based on OkHttp
 
+[![Circle CI](https://circleci.com/gh/launchdarkly/okhttp-eventsource.svg?style=shield)](https://circleci.com/gh/launchdarkly/okhttp-eventsource)
+[![Javadocs](http://javadoc.io/badge/com.launchdarkly/okhttp-eventsource.svg)](http://javadoc.io/doc/com.launchdarkly/okhttp-eventsource)
+
 Project Information
 -----------
 

@@ -7,6 +7,8 @@ import okio.Okio;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.launchdarkly.eventsource.ConnectionErrorHandler.Action;
+
 import javax.annotation.Nullable;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
@@ -211,8 +213,12 @@ public class EventSource implements ConnectionHandler, Closeable {
         } catch (EOFException eofe) {
           logger.warn("Connection unexpectedly closed.");
         } catch (IOException ioe) {
-          logger.debug("Connection problem.", ioe);
-          errorHandlerAction = dispatchError(ioe);
+          if (readyState.get() != SHUTDOWN) {
+        	  	logger.debug("Connection problem.", ioe);
+        	  	errorHandlerAction = dispatchError(ioe);
+          } else {
+        	  	errorHandlerAction = ConnectionErrorHandler.Action.SHUTDOWN;
+          }
           if (ioe instanceof SocketTimeoutException) {
             timedOut = true;
           }

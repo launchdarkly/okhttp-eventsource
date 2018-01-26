@@ -94,6 +94,7 @@ public class EventSource implements ConnectionHandler, Closeable {
       public Thread newThread(Runnable runnable) {
         Thread thread = backingThreadFactory.newThread(runnable);
         thread.setName(format(Locale.ROOT, "%s-[%s]-%d", type, name, count.getAndIncrement()));
+        thread.setDaemon(true);
         return thread;
       }
     };

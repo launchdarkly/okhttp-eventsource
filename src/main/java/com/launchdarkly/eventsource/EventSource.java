@@ -69,7 +69,7 @@ public class EventSource implements ConnectionHandler, Closeable {
 
   EventSource(Builder builder) {
     this.name = builder.name;
-    this.logger = LoggerFactory.getLogger("okhttp-eventsource-[" + name + "]");
+    this.logger = LoggerFactory.getLogger(EventSource.class.getCanonicalName() + "." + name);
     this.uri = builder.uri;
     this.headers = addDefaultHeaders(builder.headers);
     this.method = builder.method;

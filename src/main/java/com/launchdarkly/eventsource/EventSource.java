@@ -44,7 +44,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   private final Logger logger;
 
   private static final long DEFAULT_RECONNECT_TIME_MS = 1000;
-  static final long MAX_RECONNECT_TIME_MS = 30000;
+  static final long DEFAULT_MAX_RECONNECT_TIME_MS = 30000;
   static final int DEFAULT_CONNECT_TIMEOUT_MS = 10000;
   static final int DEFAULT_WRITE_TIMEOUT_MS = 5000;
   static final int DEFAULT_READ_TIMEOUT_MS = 1000 * 60 * 5;
@@ -57,6 +57,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   private final ExecutorService eventExecutor;
   private final ExecutorService streamExecutor;
   private volatile long reconnectTimeMs = 0;
+  private volatile long maxReconnectTimeMs;
   private volatile String lastEventId;
   private final EventHandler handler;
   private final ConnectionErrorHandler connectionErrorHandler;
@@ -75,6 +76,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     this.method = builder.method;
     this.body = builder.body;
     this.reconnectTimeMs = builder.reconnectTimeMs;
+    this.maxReconnectTimeMs = builder.maxReconnectTimeMs;
     ThreadFactory eventsThreadFactory = createThreadFactory("okhttp-eventsource-events");
     this.eventExecutor = Executors.newSingleThreadExecutor(eventsThreadFactory);
     ThreadFactory streamThreadFactory = createThreadFactory("okhttp-eventsource-stream");
@@ -289,7 +291,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   }
 
   long backoffWithJitter(int reconnectAttempts) {
-    long jitterVal = Math.min(MAX_RECONNECT_TIME_MS, reconnectTimeMs * pow2(reconnectAttempts));
+    long jitterVal = Math.min(maxReconnectTimeMs, reconnectTimeMs * pow2(reconnectAttempts));
     return jitterVal / 2 + nextLong(jitter, jitterVal) / 2;
   }
 
@@ -333,6 +335,14 @@ public class EventSource implements ConnectionHandler, Closeable {
     this.reconnectTimeMs = reconnectionTimeMs;
   }
 
+  public void setMaxReconnectTimeMs(long maxReconnectTimeMs) {
+    this.maxReconnectTimeMs = maxReconnectTimeMs;
+  }
+
+  public long getMaxReconnectTimeMs() {
+    return this.maxReconnectTimeMs;
+  }
+
   public void setLastEventId(String lastEventId) {
     this.lastEventId = lastEventId;
   }
@@ -348,6 +358,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   public static final class Builder {
     private String name = "";
     private long reconnectTimeMs = DEFAULT_RECONNECT_TIME_MS;
+    private long maxReconnectTimeMs = DEFAULT_MAX_RECONNECT_TIME_MS;
     private final URI uri;
     private final EventHandler handler;
     private ConnectionErrorHandler connectionErrorHandler = ConnectionErrorHandler.DEFAULT;
@@ -416,6 +427,18 @@ public class EventSource implements ConnectionHandler, Closeable {
      */
     public Builder reconnectTimeMs(long reconnectTimeMs) {
       this.reconnectTimeMs = reconnectTimeMs;
+      return this;
+    }
+
+    /**
+     * Set the max reconnect time for the EventSource connection in milliseconds.  The exponential backoff computed
+     * for reconnect attempts will not be larger than this value.  Defaults to 30000 ms (30 seconds).
+     *
+     * @param maxReconnectTimeMs the maximum reconnect base time in milliseconds
+     * @return the builder
+     */
+    public Builder maxReconnectTimeMs(long maxReconnectTimeMs) {
+      this.maxReconnectTimeMs = maxReconnectTimeMs;
       return this;
     }
 

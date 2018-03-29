@@ -56,8 +56,8 @@ public class EventSource implements ConnectionHandler, Closeable {
   @Nullable private final RequestBody body;
   private final ExecutorService eventExecutor;
   private final ExecutorService streamExecutor;
-  private volatile long reconnectTimeMs = 0;
-  private volatile long maxReconnectTimeMs;
+  private long reconnectTimeMs = 0;
+  private long maxReconnectTimeMs;
   private volatile String lastEventId;
   private final EventHandler handler;
   private final ConnectionErrorHandler connectionErrorHandler;

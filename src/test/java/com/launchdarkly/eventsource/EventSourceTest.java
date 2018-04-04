@@ -31,9 +31,17 @@ public class EventSourceTest {
   }
 
   @Test
-  public void respectsMaximumBackoffTime() {
+  public void respectsDefaultMaximumBackoffTime() {
     eventSource.setReconnectionTimeMs(2000);
-    Assert.assertTrue(eventSource.backoffWithJitter(300) < EventSource.MAX_RECONNECT_TIME_MS);
+    assertEquals(EventSource.DEFAULT_MAX_RECONNECT_TIME_MS, eventSource.getMaxReconnectTimeMs());
+    Assert.assertTrue(eventSource.backoffWithJitter(300) < eventSource.getMaxReconnectTimeMs());
+  }
+
+  @Test
+  public void respectsCustomMaximumBackoffTime() {
+    eventSource.setReconnectionTimeMs(2000);
+    eventSource.setMaxReconnectTimeMs(5000);
+    Assert.assertTrue(eventSource.backoffWithJitter(300) < eventSource.getMaxReconnectTimeMs());
   }
 
   @Ignore("Useful for inspecting jitter values empirically")

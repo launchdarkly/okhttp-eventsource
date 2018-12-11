@@ -50,7 +50,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   static final int DEFAULT_READ_TIMEOUT_MS = 1000 * 60 * 5;
 
   private final String name;
-  private volatile URI uri;
+  private volatile HttpUrl url;
   private final Headers headers;
   private final String method;
   @Nullable private final RequestBody body;
@@ -71,7 +71,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   EventSource(Builder builder) {
     this.name = builder.name;
     this.logger = LoggerFactory.getLogger(EventSource.class.getCanonicalName() + "." + name);
-    this.uri = builder.uri;
+    this.url = builder.url;
     this.headers = addDefaultHeaders(builder.headers);
     this.method = builder.method;
     this.body = builder.body;
@@ -108,7 +108,7 @@ public class EventSource implements ConnectionHandler, Closeable {
       return;
     }
     logger.debug("readyState change: " + RAW + " -> " + CONNECTING);
-    logger.info("Starting EventSource client using URI: " + uri);
+    logger.info("Starting EventSource client using URI: " + url);
     streamExecutor.execute(new Runnable() {
       public void run() {
         connect();
@@ -158,10 +158,11 @@ public class EventSource implements ConnectionHandler, Closeable {
       }
     }
   }
+  
   Request buildRequest() {
     Request.Builder builder = new Request.Builder()
         .headers(headers)
-        .url(uri.toASCIIString())
+        .url(url)
         .method(method, body);
 
     if (lastEventId != null && !lastEventId.isEmpty()) {
@@ -205,7 +206,7 @@ public class EventSource implements ConnectionHandler, Closeable {
               bufferedSource.close();
             }
             bufferedSource = Okio.buffer(response.body().source());
-            EventParser parser = new EventParser(uri, handler, EventSource.this);
+            EventParser parser = new EventParser(url.uri(), handler, EventSource.this);
             for (String line; !Thread.currentThread().isInterrupted() && (line = bufferedSource.readUtf8LineStrict()) != null; ) {
               parser.line(line);
             }
@@ -347,19 +348,61 @@ public class EventSource implements ConnectionHandler, Closeable {
     this.lastEventId = lastEventId;
   }
 
+  /**
+   * Returns the current stream endpoint as an OkHttp HttpUrl.
+   * 
+   * @since 1.9.0
+   */
+  public HttpUrl getHttpUrl() {
+    return this.url;
+  }
+  
+  /**
+   * Returns the current stream endpoint as a java.net.URI.
+   */
   public URI getUri() {
-    return this.uri;
+    return this.url.uri();
   }
 
+  /**
+   * Changes the stream endpoint. This change will not take effect until the next time the
+   * EventSource attempts to make a connection.
+   * 
+   * @param url the new endpoint, as an OkHttp HttpUrl
+   * @throws IllegalArgumentException if the parameter is null or if the scheme is not HTTP or HTTPS
+   * 
+   * @since 1.9.0
+   */
+  public void setHttpUrl(HttpUrl url) {
+    if (url == null) {
+      throw badUrlException();
+    }
+    this.url = url;
+  }
+  
+  /**
+   * Changes the stream endpoint. This change will not take effect until the next time the
+   * EventSource attempts to make a connection.
+   * 
+   * @param url the new endpoint, as a java.net.URI
+   * @throws IllegalArgumentException if the parameter is null or if the scheme is not HTTP or HTTPS
+   */
   public void setUri(URI uri) {
-    this.uri = uri;
+    setHttpUrl(uri == null ? null : HttpUrl.get(uri));
   }
 
+  private static IllegalArgumentException badUrlException() {
+    return new IllegalArgumentException("URI/URL must not be null and must be HTTP or HTTPS");
+  }
+  
+  /**
+   * Builder for {@link EventSource}.
+   */
   public static final class Builder {
     private String name = "";
     private long reconnectTimeMs = DEFAULT_RECONNECT_TIME_MS;
     private long maxReconnectTimeMs = DEFAULT_MAX_RECONNECT_TIME_MS;
-    private final URI uri;
+    private final HttpUrl url;
     private final EventHandler handler;
     private ConnectionErrorHandler connectionErrorHandler = ConnectionErrorHandler.DEFAULT;
     private Headers headers = Headers.of();
@@ -374,11 +417,37 @@ public class EventSource implements ConnectionHandler, Closeable {
             .writeTimeout(DEFAULT_WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .retryOnConnectionFailure(true);
 
+    /**
+     * Creates a new builder.
+     * 
+     * @param handler the event handler
+     * @param uri the endpoint as a java.net.URI
+     * @throws IllegalArgumentException if either argument is null, or if the endpoint is not HTTP or HTTPS
+     */
     public Builder(EventHandler handler, URI uri) {
-      this.uri = uri;
-      this.handler = handler;
+      this(handler, uri == null ? null : HttpUrl.get(uri));
     }
 
+    /**
+     * Creates a new builder.
+     * 
+     * @param handler the event handler
+     * @param uri the endpoint as an OkHttp HttpUrl
+     * @throws IllegalArgumentException if either argument is null, or if the endpoint is not HTTP or HTTPS
+     * 
+     * @since 1.9.0
+     */
+    public Builder(EventHandler handler, HttpUrl url) {
+      if (handler == null) {
+        throw new IllegalArgumentException("handler must not be null");
+      }
+      if (url == null) {
+        throw badUrlException();
+      }
+      this.url = url;
+      this.handler = handler;
+    }
+    
     /**
      * Set the HTTP method used for this EventSource client to use for requests to establish the EventSource.
      *
@@ -547,6 +616,10 @@ public class EventSource implements ConnectionHandler, Closeable {
       return this;
     }
 
+    /**
+     * Constructs an {@link EventSource} using the builder's current properties.
+     * @return the new EventSource instance
+     */
     public EventSource build() {
       if (proxy != null) {
         clientBuilder.proxy(proxy);

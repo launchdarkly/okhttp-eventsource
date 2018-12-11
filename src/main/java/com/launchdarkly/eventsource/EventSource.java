@@ -54,6 +54,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   private final Headers headers;
   private final String method;
   @Nullable private final RequestBody body;
+  private final RequestTransformer requestTransformer;
   private final ExecutorService eventExecutor;
   private final ExecutorService streamExecutor;
   private long reconnectTimeMs = 0;
@@ -75,6 +76,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     this.headers = addDefaultHeaders(builder.headers);
     this.method = builder.method;
     this.body = builder.body;
+    this.requestTransformer = builder.requestTransformer;
     this.reconnectTimeMs = builder.reconnectTimeMs;
     this.maxReconnectTimeMs = builder.maxReconnectTimeMs;
     ThreadFactory eventsThreadFactory = createThreadFactory("okhttp-eventsource-events");
@@ -158,6 +160,7 @@ public class EventSource implements ConnectionHandler, Closeable {
       }
     }
   }
+  
   Request buildRequest() {
     Request.Builder builder = new Request.Builder()
         .headers(headers)
@@ -167,7 +170,9 @@ public class EventSource implements ConnectionHandler, Closeable {
     if (lastEventId != null && !lastEventId.isEmpty()) {
       builder.addHeader("Last-Event-ID", lastEventId);
     }
-    return builder.build();
+    
+    Request request = builder.build();
+    return requestTransformer == null ? request : requestTransformer.transformRequest(request);
   }
 
   private void connect() {
@@ -355,6 +360,36 @@ public class EventSource implements ConnectionHandler, Closeable {
     this.uri = uri;
   }
 
+  /**
+   * Interface for an object that can modify the network request that the EventSource will make.
+   * Use this in conjunction with {@link Builder#requestTransformer} if you need to set request
+   * properties other than the ones that are already supported by the builder (or if, for
+   * whatever reason, you need to determine the request properties dynamically rather than
+   * setting them to fixed values initially). For example:
+   * <code>
+   * public class RequestTagger implements EventSource.RequestTransformer {
+   *   public Request transformRequest(Request input) {
+   *     return input.newBuilder().tag("hello").build();
+   *   }
+   * }
+   * 
+   * EventSource es = new EventSource.Builder(handler, uri).requestTransformer(new RequestTagger()).build();
+   * </code>
+   * 
+   * @since 1.9.0
+   */
+  public static interface RequestTransformer {
+    /**
+     * Returns a request that is either the same as the input request or based on it. When
+     * this method is called, EventSource has already set all of its standard properties on
+     * the request.
+     * 
+     * @param input the original request
+     * @return the request that will be used
+     */
+    public Request transformRequest(Request input);
+  }
+  
   public static final class Builder {
     private String name = "";
     private long reconnectTimeMs = DEFAULT_RECONNECT_TIME_MS;
@@ -366,6 +401,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     private Proxy proxy;
     private Authenticator proxyAuthenticator = null;
     private String method = "GET";
+    private RequestTransformer requestTransformer = null;
     @Nullable private RequestBody body = null;
     private OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
             .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
@@ -404,6 +440,19 @@ public class EventSource implements ConnectionHandler, Closeable {
       return this;
     }
 
+    /**
+     * Specifies an object that will be used to customize outgoing requests. See {@link RequestTransformer} for details.
+     * 
+     * @param requestTransformer the transformer object
+     * @return the builder
+     * 
+     * @since 1.9.0
+     */
+    public Builder requestTransformer(@Nullable RequestTransformer requestTransformer) {
+      this.requestTransformer = requestTransformer;
+      return this;
+    }
+    
     /**
      * Set the name for this EventSource client to be used when naming the logger and threadpools. This is mainly useful when
      * multiple EventSource clients exist within the same process.

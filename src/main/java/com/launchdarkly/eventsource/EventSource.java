@@ -451,6 +451,8 @@ public class EventSource implements ConnectionHandler, Closeable {
      * @param backoffResetThresholdMs the minimum time in milliseconds that a connection must stay open to
      *   avoid resetting the delay 
      * @return the builder
+     * 
+     * @since 1.9.0
      */
     public Builder backoffResetThresholdMs(long backoffResetThresholdMs) {
       this.backoffResetThresholdMs = backoffResetThresholdMs;

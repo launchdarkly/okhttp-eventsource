@@ -1,5 +1,6 @@
 package com.launchdarkly.eventsource;
 
+import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -20,16 +21,84 @@ import static org.junit.Assert.assertNull;
 import static org.mockito.Mockito.mock;
 
 public class EventSourceTest {
+  private static final URI STREAM_URI = URI.create("http://www.example.com/");
+  private static final HttpUrl STREAM_HTTP_URL = HttpUrl.parse("http://www.example.com/");
   private EventSource eventSource;
   private EventSource.Builder builder;
 
   @Before
   public void setUp() {
     EventHandler eventHandler = mock(EventHandler.class);
-    builder = new EventSource.Builder(eventHandler, URI.create("http://www.example.com"));
+    builder = new EventSource.Builder(eventHandler, STREAM_URI);
     eventSource = builder.build();
   }
 
+  @Test
+  public void hasExpectedUri() {
+    assertEquals(STREAM_URI, eventSource.getUri());
+  }
+
+  @Test
+  public void hasExpectedUriWhenInitializedWithHttpUrl() {
+    EventSource es = new EventSource.Builder(mock(EventHandler.class), STREAM_HTTP_URL).build();
+    assertEquals(STREAM_URI, es.getUri());
+  }
+  
+  @Test
+  public void hasExpectedHttpUrlWhenInitializedWithUri() {
+    assertEquals(STREAM_HTTP_URL, eventSource.getHttpUrl());
+  }
+  
+  @Test
+  public void hasExpectedHttpUrlWhenInitializedWithHttpUrl() {
+    EventSource es = new EventSource.Builder(mock(EventHandler.class), STREAM_HTTP_URL).build();
+    assertEquals(STREAM_HTTP_URL, es.getHttpUrl());
+  }
+  
+  @Test(expected=IllegalArgumentException.class)
+  public void handlerCannotBeNull() {
+    new EventSource.Builder(null, STREAM_URI);
+  }
+
+  @Test(expected=IllegalArgumentException.class)
+  public void uriCannotBeNull() {
+    new EventSource.Builder(mock(EventHandler.class), (URI)null);
+  }
+
+  @Test(expected=IllegalArgumentException.class)
+  public void httpUrlCannotBeNull() {
+    new EventSource.Builder(mock(EventHandler.class), (HttpUrl)null);
+  }
+
+  @Test
+  public void canSetUri() {
+    URI uri = URI.create("http://www.other.com/");
+    eventSource.setUri(uri);
+    assertEquals(uri, eventSource.getUri());
+  }
+
+  @Test(expected=IllegalArgumentException.class)
+  public void cannotSetUriToNull() {
+    eventSource.setUri(null);
+  }
+
+  @Test(expected=IllegalArgumentException.class)
+  public void cannotSetUriToInvalidScheme() {
+    eventSource.setUri(URI.create("gopher://example.com/"));
+  }
+
+  @Test
+  public void canSetHttpUrl() {
+    HttpUrl url = HttpUrl.parse("http://www.other.com/");
+    eventSource.setHttpUrl(url);
+    assertEquals(url, eventSource.getHttpUrl());
+  }
+  
+  @Test(expected=IllegalArgumentException.class)
+  public void cannotSetHttpUrlToNull() {
+    eventSource.setHttpUrl(null);
+  }
+  
   @Test
   public void respectsDefaultMaximumBackoffTime() {
     eventSource.setReconnectionTimeMs(2000);

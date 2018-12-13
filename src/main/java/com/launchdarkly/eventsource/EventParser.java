@@ -34,6 +34,11 @@ public class EventParser {
     this.connectionHandler = connectionHandler;
   }
 
+  /**
+   * Accepts a single line of input and updates the parser state. If this completes a valid event,
+   * the event is sent to the {@link EventHandler}.
+   * @param line an input line
+   */
   public void line(String line) {
     logger.debug("Parsing line: " + line);
     int colonIndex;

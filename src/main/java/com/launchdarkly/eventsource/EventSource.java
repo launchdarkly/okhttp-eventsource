@@ -40,12 +40,30 @@ import static java.lang.String.format;
 public class EventSource implements ConnectionHandler, Closeable {
   private final Logger logger;
 
-  private static final long DEFAULT_RECONNECT_TIME_MS = 1000;
-  static final long DEFAULT_MAX_RECONNECT_TIME_MS = 30000;
-  static final int DEFAULT_CONNECT_TIMEOUT_MS = 10000;
-  static final int DEFAULT_WRITE_TIMEOUT_MS = 5000;
-  static final int DEFAULT_READ_TIMEOUT_MS = 1000 * 60 * 5;
-  static final int DEFAULT_BACKOFF_RESET_THRESHOLD_MS = 1000 * 60;
+  /**
+   * The default value for {@link Builder#reconnectTimeMs(long)}: 1000 (1 second).
+   */
+  public static final long DEFAULT_RECONNECT_TIME_MS = 1000;
+  /**
+   * The default value for {@link Builder#maxReconnectTimeMs(long)}: 30000 (30 seconds).
+   */
+  public static final long DEFAULT_MAX_RECONNECT_TIME_MS = 30000;
+  /**
+   * The default value for {@link Builder#connectTimeoutMs(int)}: 10000 (10 seconds).
+   */
+  public static final int DEFAULT_CONNECT_TIMEOUT_MS = 10000;
+  /**
+   * The default value for {@link Builder#writeTimeoutMs(int)}: 5000 (5 seconds).
+   */
+  public static final int DEFAULT_WRITE_TIMEOUT_MS = 5000;
+  /**
+   * The default value for {@link Builder#readTimeoutMs(int)}: 300000 (5 minutes).
+   */
+  public static final int DEFAULT_READ_TIMEOUT_MS = 1000 * 60 * 5;
+  /**
+   * The default value for {@link Builder#backoffResetThresholdMs(long)}: 60000 (60 seconds).
+   */
+  public static final int DEFAULT_BACKOFF_RESET_THRESHOLD_MS = 1000 * 60;
 
   private final String name;
   private volatile HttpUrl url;
@@ -104,6 +122,10 @@ public class EventSource implements ConnectionHandler, Closeable {
     };
   }
 
+  /**
+   * Attempts to connect to the remote event source if not already connected. This method returns
+   * immediately; the connection happens on a worker thread.
+   */
   public void start() {
     if (!readyState.compareAndSet(RAW, CONNECTING)) {
       logger.info("Start method called on this already-started EventSource object. Doing nothing");
@@ -118,6 +140,10 @@ public class EventSource implements ConnectionHandler, Closeable {
     });
   }
 
+  /**
+   * Returns an enum indicating the current status of the connection.
+   * @return a {@link ReadyState} value
+   */
   public ReadyState getState() {
     return readyState.get();
   }
@@ -334,26 +360,56 @@ public class EventSource implements ConnectionHandler, Closeable {
     return builder.build();
   }
 
+  /**
+   * Sets the minimum delay between connection attempts. The actual delay may be slightly less or
+   * greater, since there is a random jitter. When there is a connection failure, the delay will
+   * start at this value and will increase exponentially up to the {@link #setMaxReconnectTimeMs(long)}
+   * value with each subsequent failure, unless it is reset as described in
+   * {@link Builder#backoffResetThresholdMs(long)}.
+   * @param reconnectionTimeMs the minimum delay in milliseconds
+   * @see #setMaxReconnectTimeMs(long)
+   * @see Builder#reconnectTimeMs(long)
+   * @see #DEFAULT_RECONNECT_TIME_MS
+   */
   public void setReconnectionTimeMs(long reconnectionTimeMs) {
     this.reconnectTimeMs = reconnectionTimeMs;
   }
 
+  /**
+   * Sets the maximum delay between connection attempts. See {@link #setReconnectionTimeMs(long)}.
+   * The default value is 30000 (30 seconds).
+   * @param maxReconnectTimeMs the maximum delay in milliseconds
+   * @see #setReconnectionTimeMs(long)
+   * @see Builder#maxReconnectTimeMs(long)
+   * @see #DEFAULT_MAX_RECONNECT_TIME_MS
+   */
   public void setMaxReconnectTimeMs(long maxReconnectTimeMs) {
     this.maxReconnectTimeMs = maxReconnectTimeMs;
   }
 
+  /**
+   * Returns the current maximum reconnect delay as set by {@link #setReconnectionTimeMs(long)}.
+   * @return the maximum delay in milliseconds
+   */
   public long getMaxReconnectTimeMs() {
     return this.maxReconnectTimeMs;
   }
 
+  /**
+   * Sets the ID value of the last event received. This will be sent to the remote server on the
+   * next connection attempt.
+   * @param lastEventId the last event identifier
+   */
   public void setLastEventId(String lastEventId) {
     this.lastEventId = lastEventId;
   }
 
   /**
    * Returns the current stream endpoint as an OkHttp HttpUrl.
-   * 
+   * @return the endpoint URL
    * @since 1.9.0
+   * @see #getUri()
+   * @see #setHttpUrl(HttpUrl)
    */
   public HttpUrl getHttpUrl() {
     return this.url;
@@ -361,6 +417,9 @@ public class EventSource implements ConnectionHandler, Closeable {
   
   /**
    * Returns the current stream endpoint as a java.net.URI.
+   * @return the endpoint URI
+   * @see #getHttpUrl()
+   * @see #setUri(URI)
    */
   public URI getUri() {
     return this.url.uri();
@@ -372,6 +431,8 @@ public class EventSource implements ConnectionHandler, Closeable {
    * 
    * @param url the new endpoint, as an OkHttp HttpUrl
    * @throws IllegalArgumentException if the parameter is null or if the scheme is not HTTP or HTTPS
+   * @see #getHttpUrl()
+   * @see #setUri(URI)
    * 
    * @since 1.9.0
    */
@@ -386,8 +447,10 @@ public class EventSource implements ConnectionHandler, Closeable {
    * Changes the stream endpoint. This change will not take effect until the next time the
    * EventSource attempts to make a connection.
    * 
-   * @param url the new endpoint, as a java.net.URI
+   * @param uri the new endpoint, as a java.net.URI
    * @throws IllegalArgumentException if the parameter is null or if the scheme is not HTTP or HTTPS
+   * @see #getUri()
+   * @see #setHttpUrl(HttpUrl)
    */
   public void setUri(URI uri) {
     setHttpUrl(uri == null ? null : HttpUrl.get(uri));
@@ -399,7 +462,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   
   /**
    * Interface for an object that can modify the network request that the EventSource will make.
-   * Use this in conjunction with {@link Builder#requestTransformer} if you need to set request
+   * Use this in conjunction with {@link Builder#requestTransformer(RequestTransformer)} if you need to set request
    * properties other than the ones that are already supported by the builder (or if, for
    * whatever reason, you need to determine the request properties dynamically rather than
    * setting them to fixed values initially). For example:
@@ -466,7 +529,7 @@ public class EventSource implements ConnectionHandler, Closeable {
      * Creates a new builder.
      * 
      * @param handler the event handler
-     * @param uri the endpoint as an OkHttp HttpUrl
+     * @param url the endpoint as an OkHttp HttpUrl
      * @throws IllegalArgumentException if either argument is null, or if the endpoint is not HTTP or HTTPS
      * 
      * @since 1.9.0
@@ -535,11 +598,15 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
 
     /**
-     * Set the reconnect base time for the EventSource connection in milliseconds. Reconnect attempts are computed
-     * from this base value with an exponential backoff and jitter.
-     *
-     * @param reconnectTimeMs the reconnect base time in milliseconds
+     * Sets the minimum delay between connection attempts. The actual delay may be slightly less or
+     * greater, since there is a random jitter. When there is a connection failure, the delay will
+     * start at this value and will increase exponentially up to the {@link #setMaxReconnectTimeMs(long)}
+     * value with each subsequent failure, unless it is reset as described in
+     * {@link Builder#backoffResetThresholdMs(long)}.
+     * @param reconnectTimeMs the minimum delay in milliseconds
      * @return the builder
+     * @see EventSource#DEFAULT_RECONNECT_TIME_MS
+     * @see EventSource#setReconnectionTimeMs(long)
      */
     public Builder reconnectTimeMs(long reconnectTimeMs) {
       this.reconnectTimeMs = reconnectTimeMs;
@@ -547,11 +614,12 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
 
     /**
-     * Set the max reconnect time for the EventSource connection in milliseconds.  The exponential backoff computed
-     * for reconnect attempts will not be larger than this value.  Defaults to 30000 ms (30 seconds).
-     *
-     * @param maxReconnectTimeMs the maximum reconnect base time in milliseconds
+     * Sets the maximum delay between connection attempts. See {@link #setReconnectionTimeMs(long)}.
+     * The default value is 30000 (30 seconds).
+     * @param maxReconnectTimeMs the maximum delay in milliseconds
      * @return the builder
+     * @see EventSource#DEFAULT_MAX_RECONNECT_TIME_MS
+     * @see EventSource#setMaxReconnectTimeMs(long)
      */
     public Builder maxReconnectTimeMs(long maxReconnectTimeMs) {
       this.maxReconnectTimeMs = maxReconnectTimeMs;
@@ -568,6 +636,7 @@ public class EventSource implements ConnectionHandler, Closeable {
      * @param backoffResetThresholdMs the minimum time in milliseconds that a connection must stay open to
      *   avoid resetting the delay 
      * @return the builder
+     * @see EventSource#DEFAULT_BACKOFF_RESET_THRESHOLD_MS
      * 
      * @since 1.9.0
      */
@@ -626,8 +695,8 @@ public class EventSource implements ConnectionHandler, Closeable {
     /**
      * Sets the Proxy Authentication mechanism if needed. Defaults to no auth.
      *
-     * @param proxyAuthenticator
-     * @return
+     * @param proxyAuthenticator the authentication mechanism
+     * @return the builder
      */
     public Builder proxyAuthenticator(Authenticator proxyAuthenticator) {
       this.proxyAuthenticator = proxyAuthenticator;
@@ -635,10 +704,11 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
 
     /**
-     * Sets the connect timeout in milliseconds if needed. Defaults to {@value #DEFAULT_CONNECT_TIMEOUT_MS}
+     * Sets the connection timeout.
      *
-     * @param connectTimeoutMs
-     * @return
+     * @param connectTimeoutMs the connection timeout in milliseconds
+     * @return the builder
+     * @see EventSource#DEFAULT_CONNECT_TIMEOUT_MS
      */
     public Builder connectTimeoutMs(int connectTimeoutMs) {
       this.clientBuilder.connectTimeout(connectTimeoutMs, TimeUnit.MILLISECONDS);
@@ -646,10 +716,11 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
 
     /**
-     * Sets the write timeout in milliseconds if needed. Defaults to {@value #DEFAULT_WRITE_TIMEOUT_MS}
+     * Sets the write timeout in milliseconds.
      *
-     * @param writeTimeoutMs
-     * @return
+     * @param writeTimeoutMs the write timeout in milliseconds
+     * @return the builder
+     * @see EventSource#DEFAULT_WRITE_TIMEOUT_MS
      */
     public Builder writeTimeoutMs(int writeTimeoutMs) {
       this.clientBuilder.writeTimeout(writeTimeoutMs, TimeUnit.MILLISECONDS);
@@ -657,11 +728,12 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
 
     /**
-     * Sets the read timeout in milliseconds if needed. If a read timeout happens, the {@code EventSource}
-     * will restart the connection. Defaults to {@value #DEFAULT_READ_TIMEOUT_MS}
+     * Sets the read timeout in milliseconds. If a read timeout happens, the {@code EventSource}
+     * will restart the connection.
      *
-     * @param readTimeoutMs
-     * @return
+     * @param readTimeoutMs the read timeout in milliseconds
+     * @return the builder
+     * @see EventSource#DEFAULT_WRITE_TIMEOUT_MS
      */
     public Builder readTimeoutMs(int readTimeoutMs) {
       this.clientBuilder.readTimeout(readTimeoutMs, TimeUnit.MILLISECONDS);
@@ -671,8 +743,8 @@ public class EventSource implements ConnectionHandler, Closeable {
     /**
      * Sets the {@link ConnectionErrorHandler} that should process connection errors.
      *
-     * @param handler
-     * @return
+     * @param handler the error handler
+     * @return the builder
      */
     public Builder connectionErrorHandler(ConnectionErrorHandler handler) {
       if (handler != null) {

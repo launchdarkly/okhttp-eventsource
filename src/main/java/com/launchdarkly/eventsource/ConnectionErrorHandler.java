@@ -1,5 +1,10 @@
 package com.launchdarkly.eventsource;
 
+/**
+ * Interface for an object that will be notified when EventSource encounters a connection failure.
+ * This is different from {@link EventHandler#onError(Throwable)} in that it will not be called for
+ * other kinds of errors; also, it has the ability to tell EventSource to stop reconnecting.
+ */
 public interface ConnectionErrorHandler {
   /**
    * Return values of {@link ConnectionErrorHandler#onConnectionError(Throwable)} indicating what
@@ -28,6 +33,9 @@ public interface ConnectionErrorHandler {
    */
   Action onConnectionError(Throwable t);
   
+  /**
+   * Default handler that does nothing.
+   */
   public static final ConnectionErrorHandler DEFAULT = new ConnectionErrorHandler() {
     @Override
     public Action onConnectionError(Throwable t) {

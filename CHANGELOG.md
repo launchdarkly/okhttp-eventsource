@@ -2,6 +2,16 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [1.9.0] - 2018-12-12
+### Added:
+- The `requestTransformer` option allows you to customize the outgoing request in any way you like. ([#28](https://github.com/launchdarkly/okhttp-eventsource/issues/28))
+- It is now possible to specify the endpoint as either a `URI` or an OkHttp `HttpUrl`. ([#29](https://github.com/launchdarkly/okhttp-eventsource/issues/29))
+- The `backoffResetThresholdMs` option controls the new backoff behavior described below.
+- Added Javadoc comments for all public members.
+
+### Changed:
+- The exponential backoff behavior when a stream connection fails has changed as follows. Previously, the backoff delay would increase for each attempt if the connection could not be made at all, or if a read timeout happened; but if a connection was made and then an error (other than a timeout) occurred, the delay would be reset to the minimum value. Now, the delay is only reset if a stream connection is made and remains open for at least `backoffResetThresholdMs` milliseconds. The default for this value is one minute (60000).
+
 ## [1.8.0] - 2018-04-04
 ### Added:
 - Added `maxReconnectTimeMs(long)` method to `EventSource.Builder` to override the default maximum reconnect time of 30 seconds

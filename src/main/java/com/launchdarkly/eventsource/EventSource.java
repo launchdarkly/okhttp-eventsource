@@ -7,8 +7,6 @@ import okio.Okio;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.launchdarkly.eventsource.ConnectionErrorHandler.Action;
-
 import javax.annotation.Nullable;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
@@ -19,7 +17,6 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
-import java.net.SocketTimeoutException;
 import java.net.Proxy.Type;
 import java.net.URI;
 import java.security.GeneralSecurityException;
@@ -48,16 +45,19 @@ public class EventSource implements ConnectionHandler, Closeable {
   static final int DEFAULT_CONNECT_TIMEOUT_MS = 10000;
   static final int DEFAULT_WRITE_TIMEOUT_MS = 5000;
   static final int DEFAULT_READ_TIMEOUT_MS = 1000 * 60 * 5;
+  static final int DEFAULT_BACKOFF_RESET_THRESHOLD_MS = 1000 * 60;
 
   private final String name;
   private volatile HttpUrl url;
   private final Headers headers;
   private final String method;
   @Nullable private final RequestBody body;
+  private final RequestTransformer requestTransformer;
   private final ExecutorService eventExecutor;
   private final ExecutorService streamExecutor;
-  private long reconnectTimeMs = 0;
+  private long reconnectTimeMs;
   private long maxReconnectTimeMs;
+  private final long backoffResetThresholdMs;
   private volatile String lastEventId;
   private final EventHandler handler;
   private final ConnectionErrorHandler connectionErrorHandler;
@@ -75,8 +75,10 @@ public class EventSource implements ConnectionHandler, Closeable {
     this.headers = addDefaultHeaders(builder.headers);
     this.method = builder.method;
     this.body = builder.body;
+    this.requestTransformer = builder.requestTransformer;
     this.reconnectTimeMs = builder.reconnectTimeMs;
     this.maxReconnectTimeMs = builder.maxReconnectTimeMs;
+    this.backoffResetThresholdMs = builder.backoffResetThresholdMs;
     ThreadFactory eventsThreadFactory = createThreadFactory("okhttp-eventsource-events");
     this.eventExecutor = Executors.newSingleThreadExecutor(eventsThreadFactory);
     ThreadFactory streamThreadFactory = createThreadFactory("okhttp-eventsource-stream");
@@ -168,7 +170,9 @@ public class EventSource implements ConnectionHandler, Closeable {
     if (lastEventId != null && !lastEventId.isEmpty()) {
       builder.addHeader("Last-Event-ID", lastEventId);
     }
-    return builder.build();
+    
+    Request request = builder.build();
+    return requestTransformer == null ? request : requestTransformer.transformRequest(request);
   }
 
   private void connect() {
@@ -180,16 +184,15 @@ public class EventSource implements ConnectionHandler, Closeable {
     
     try {
       while (!Thread.currentThread().isInterrupted() && readyState.get() != SHUTDOWN) {
-        boolean gotResponse = false, timedOut = false;
+        long connectedTime = -1;
 
-        maybeWaitWithBackoff(reconnectAttempts++);
         ReadyState currentState = readyState.getAndSet(CONNECTING);
         logger.debug("readyState change: " + currentState + " -> " + CONNECTING);
-        try {
+        try {        	  
           call = client.newCall(buildRequest());
           response = call.execute();
           if (response.isSuccessful()) {
-            gotResponse = true;
+            connectedTime = System.currentTimeMillis();
             currentState = readyState.getAndSet(OPEN);
             if (currentState != CONNECTING) {
               logger.warn("Unexpected readyState change: " + currentState + " -> " + OPEN);
@@ -223,9 +226,6 @@ public class EventSource implements ConnectionHandler, Closeable {
           } else {
         	  	errorHandlerAction = ConnectionErrorHandler.Action.SHUTDOWN;
           }
-          if (ioe instanceof SocketTimeoutException) {
-            timedOut = true;
-          }
         } finally {
           ReadyState nextState = CLOSED;
           if (errorHandlerAction == ConnectionErrorHandler.Action.SHUTDOWN) {
@@ -256,10 +256,12 @@ public class EventSource implements ConnectionHandler, Closeable {
               handler.onError(e);
             }
           }
-          // reset the backoff if we had a successful connection that was dropped for non-timeout reasons
-          if (gotResponse && !timedOut) {
+          // Reset the backoff if we had a successful connection that stayed good for at least
+          // backoffResetThresholdMs milliseconds.
+          if (connectedTime >= 0 && (System.currentTimeMillis() - connectedTime) >= backoffResetThresholdMs) {
             reconnectAttempts = 0;
           }
+          maybeWaitWithBackoff(++reconnectAttempts);
         }
       }
     } catch (RejectedExecutionException ignored) {
@@ -396,12 +398,43 @@ public class EventSource implements ConnectionHandler, Closeable {
   }
   
   /**
+   * Interface for an object that can modify the network request that the EventSource will make.
+   * Use this in conjunction with {@link Builder#requestTransformer} if you need to set request
+   * properties other than the ones that are already supported by the builder (or if, for
+   * whatever reason, you need to determine the request properties dynamically rather than
+   * setting them to fixed values initially). For example:
+   * <code>
+   * public class RequestTagger implements EventSource.RequestTransformer {
+   *   public Request transformRequest(Request input) {
+   *     return input.newBuilder().tag("hello").build();
+   *   }
+   * }
+   * 
+   * EventSource es = new EventSource.Builder(handler, uri).requestTransformer(new RequestTagger()).build();
+   * </code>
+   * 
+   * @since 1.9.0
+   */
+  public static interface RequestTransformer {
+    /**
+     * Returns a request that is either the same as the input request or based on it. When
+     * this method is called, EventSource has already set all of its standard properties on
+     * the request.
+     * 
+     * @param input the original request
+     * @return the request that will be used
+     */
+    public Request transformRequest(Request input);
+  }
+  
+  /**
    * Builder for {@link EventSource}.
    */
   public static final class Builder {
     private String name = "";
     private long reconnectTimeMs = DEFAULT_RECONNECT_TIME_MS;
     private long maxReconnectTimeMs = DEFAULT_MAX_RECONNECT_TIME_MS;
+    private long backoffResetThresholdMs = DEFAULT_BACKOFF_RESET_THRESHOLD_MS;
     private final HttpUrl url;
     private final EventHandler handler;
     private ConnectionErrorHandler connectionErrorHandler = ConnectionErrorHandler.DEFAULT;
@@ -409,6 +442,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     private Proxy proxy;
     private Authenticator proxyAuthenticator = null;
     private String method = "GET";
+    private RequestTransformer requestTransformer = null;
     @Nullable private RequestBody body = null;
     private OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
             .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
@@ -474,6 +508,19 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
 
     /**
+     * Specifies an object that will be used to customize outgoing requests. See {@link RequestTransformer} for details.
+     * 
+     * @param requestTransformer the transformer object
+     * @return the builder
+     * 
+     * @since 1.9.0
+     */
+    public Builder requestTransformer(@Nullable RequestTransformer requestTransformer) {
+      this.requestTransformer = requestTransformer;
+      return this;
+    }
+    
+    /**
      * Set the name for this EventSource client to be used when naming the logger and threadpools. This is mainly useful when
      * multiple EventSource clients exist within the same process.
      *
@@ -508,6 +555,24 @@ public class EventSource implements ConnectionHandler, Closeable {
      */
     public Builder maxReconnectTimeMs(long maxReconnectTimeMs) {
       this.maxReconnectTimeMs = maxReconnectTimeMs;
+      return this;
+    }
+
+    /**
+     * Sets the minimum amount of time that a connection must stay open before the EventSource resets its
+     * backoff delay. If a connection fails before the threshold has elapsed, the delay before reconnecting
+     * will be greater than the last delay; if it fails after the threshold, the delay will start over at
+     * the initial minimum value. This prevents long delays from occurring on connections that are only
+     * rarely restarted.
+     *   
+     * @param backoffResetThresholdMs the minimum time in milliseconds that a connection must stay open to
+     *   avoid resetting the delay 
+     * @return the builder
+     * 
+     * @since 1.9.0
+     */
+    public Builder backoffResetThresholdMs(long backoffResetThresholdMs) {
+      this.backoffResetThresholdMs = backoffResetThresholdMs;
       return this;
     }
 

@@ -7,8 +7,6 @@ import okio.Okio;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.launchdarkly.eventsource.ConnectionErrorHandler.Action;
-
 import javax.annotation.Nullable;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
@@ -19,7 +17,6 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
-import java.net.SocketTimeoutException;
 import java.net.Proxy.Type;
 import java.net.URI;
 import java.security.GeneralSecurityException;
@@ -48,6 +45,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   static final int DEFAULT_CONNECT_TIMEOUT_MS = 10000;
   static final int DEFAULT_WRITE_TIMEOUT_MS = 5000;
   static final int DEFAULT_READ_TIMEOUT_MS = 1000 * 60 * 5;
+  static final int DEFAULT_BACKOFF_RESET_THRESHOLD_MS = 1000 * 60;
 
   private final String name;
   private volatile URI uri;
@@ -56,8 +54,9 @@ public class EventSource implements ConnectionHandler, Closeable {
   @Nullable private final RequestBody body;
   private final ExecutorService eventExecutor;
   private final ExecutorService streamExecutor;
-  private long reconnectTimeMs = 0;
+  private long reconnectTimeMs;
   private long maxReconnectTimeMs;
+  private final long backoffResetThresholdMs;
   private volatile String lastEventId;
   private final EventHandler handler;
   private final ConnectionErrorHandler connectionErrorHandler;
@@ -77,6 +76,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     this.body = builder.body;
     this.reconnectTimeMs = builder.reconnectTimeMs;
     this.maxReconnectTimeMs = builder.maxReconnectTimeMs;
+    this.backoffResetThresholdMs = builder.backoffResetThresholdMs;
     ThreadFactory eventsThreadFactory = createThreadFactory("okhttp-eventsource-events");
     this.eventExecutor = Executors.newSingleThreadExecutor(eventsThreadFactory);
     ThreadFactory streamThreadFactory = createThreadFactory("okhttp-eventsource-stream");
@@ -179,16 +179,15 @@ public class EventSource implements ConnectionHandler, Closeable {
     
     try {
       while (!Thread.currentThread().isInterrupted() && readyState.get() != SHUTDOWN) {
-        boolean gotResponse = false, timedOut = false;
+        long connectedTime = -1;
 
-        maybeWaitWithBackoff(reconnectAttempts++);
         ReadyState currentState = readyState.getAndSet(CONNECTING);
         logger.debug("readyState change: " + currentState + " -> " + CONNECTING);
-        try {
+        try {        	  
           call = client.newCall(buildRequest());
           response = call.execute();
           if (response.isSuccessful()) {
-            gotResponse = true;
+            connectedTime = System.currentTimeMillis();
             currentState = readyState.getAndSet(OPEN);
             if (currentState != CONNECTING) {
               logger.warn("Unexpected readyState change: " + currentState + " -> " + OPEN);
@@ -222,9 +221,6 @@ public class EventSource implements ConnectionHandler, Closeable {
           } else {
         	  	errorHandlerAction = ConnectionErrorHandler.Action.SHUTDOWN;
           }
-          if (ioe instanceof SocketTimeoutException) {
-            timedOut = true;
-          }
         } finally {
           ReadyState nextState = CLOSED;
           if (errorHandlerAction == ConnectionErrorHandler.Action.SHUTDOWN) {
@@ -255,10 +251,12 @@ public class EventSource implements ConnectionHandler, Closeable {
               handler.onError(e);
             }
           }
-          // reset the backoff if we had a successful connection that was dropped for non-timeout reasons
-          if (gotResponse && !timedOut) {
+          // Reset the backoff if we had a successful connection that stayed good for at least
+          // backoffResetThresholdMs milliseconds.
+          if (connectedTime >= 0 && (System.currentTimeMillis() - connectedTime) >= backoffResetThresholdMs) {
             reconnectAttempts = 0;
           }
+          maybeWaitWithBackoff(++reconnectAttempts);
         }
       }
     } catch (RejectedExecutionException ignored) {
@@ -359,6 +357,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     private String name = "";
     private long reconnectTimeMs = DEFAULT_RECONNECT_TIME_MS;
     private long maxReconnectTimeMs = DEFAULT_MAX_RECONNECT_TIME_MS;
+    private long backoffResetThresholdMs = DEFAULT_BACKOFF_RESET_THRESHOLD_MS;
     private final URI uri;
     private final EventHandler handler;
     private ConnectionErrorHandler connectionErrorHandler = ConnectionErrorHandler.DEFAULT;
@@ -439,6 +438,24 @@ public class EventSource implements ConnectionHandler, Closeable {
      */
     public Builder maxReconnectTimeMs(long maxReconnectTimeMs) {
       this.maxReconnectTimeMs = maxReconnectTimeMs;
+      return this;
+    }
+
+    /**
+     * Sets the minimum amount of time that a connection must stay open before the EventSource resets its
+     * backoff delay. If a connection fails before the threshold has elapsed, the delay before reconnecting
+     * will be greater than the last delay; if it fails after the threshold, the delay will start over at
+     * the initial minimum value. This prevents long delays from occurring on connections that are only
+     * rarely restarted.
+     *   
+     * @param backoffResetThresholdMs the minimum time in milliseconds that a connection must stay open to
+     *   avoid resetting the delay 
+     * @return the builder
+     * 
+     * @since 1.9.0
+     */
+    public Builder backoffResetThresholdMs(long backoffResetThresholdMs) {
+      this.backoffResetThresholdMs = backoffResetThresholdMs;
       return this;
     }
 

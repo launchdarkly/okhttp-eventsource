@@ -7,7 +7,6 @@ import okio.Okio;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
@@ -69,7 +68,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   private volatile HttpUrl url;
   private final Headers headers;
   private final String method;
-  @Nullable private final RequestBody body;
+  private final RequestBody body;
   private final RequestTransformer requestTransformer;
   private final ExecutorService eventExecutor;
   private final ExecutorService streamExecutor;
@@ -506,7 +505,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     private Authenticator proxyAuthenticator = null;
     private String method = "GET";
     private RequestTransformer requestTransformer = null;
-    @Nullable private RequestBody body = null;
+    private RequestBody body = null;
     private OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
             .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
             .connectTimeout(DEFAULT_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
@@ -565,7 +564,7 @@ public class EventSource implements ConnectionHandler, Closeable {
      * @param body the body to use in HTTP requests
      * @return the builder
      */
-    public Builder body(@Nullable RequestBody body) {
+    public Builder body(RequestBody body) {
       this.body = body;
       return this;
     }
@@ -578,7 +577,7 @@ public class EventSource implements ConnectionHandler, Closeable {
      * 
      * @since 1.9.0
      */
-    public Builder requestTransformer(@Nullable RequestTransformer requestTransformer) {
+    public Builder requestTransformer(RequestTransformer requestTransformer) {
       this.requestTransformer = requestTransformer;
       return this;
     }

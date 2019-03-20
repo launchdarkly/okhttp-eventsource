@@ -21,7 +21,6 @@ allprojects {
 dependencies {
     compile "com.squareup.okhttp3:okhttp:3.8.1"
     compile "org.slf4j:slf4j-api:1.7.22"
-    compile "com.google.code.findbugs:jsr305:3.0.2"
     testRuntime "ch.qos.logback:logback-classic:1.1.9"
     testCompile "org.mockito:mockito-core:1.10.19"
     testCompile "junit:junit:4.11"

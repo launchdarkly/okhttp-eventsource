@@ -2,6 +2,10 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [1.9.1] - 2019-03-20
+### Fixed:
+- Removed JSR305 annotations such as `@Nullable`. JSR305 is unsupported and obsolete, and can cause [problems](https://blog.codefx.org/java/jsr-305-java-9/) in Java 9.
+
 ## [1.9.0] - 2018-12-12
 ### Added:
 - The `requestTransformer` option allows you to customize the outgoing request in any way you like. ([#28](https://github.com/launchdarkly/okhttp-eventsource/issues/28))

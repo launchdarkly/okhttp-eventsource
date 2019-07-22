@@ -1,5 +1,6 @@
 package com.launchdarkly.eventsource;
 
+import javax.net.ssl.SSLSocketFactory;
 import okhttp3.*;
 import okio.BufferedSource;
 import okio.Okio;
@@ -512,6 +513,13 @@ public class EventSource implements ConnectionHandler, Closeable {
             .readTimeout(DEFAULT_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .writeTimeout(DEFAULT_WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .retryOnConnectionFailure(true);
+    {
+      try {
+        clientBuilder.sslSocketFactory(new ModernTLSSocketFactory(), defaultTrustManager());
+      } catch (GeneralSecurityException e) {
+        // TLS is not available, so don't set up the socket factory, swallow the exception
+      }
+    }
 
     /**
      * Creates a new builder.
@@ -753,18 +761,25 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
 
     /**
+     * Sets the {@link SSLSocketFactory} for making TLS connections.
+     *
+     * @param sslSocketFactory the ssl socket factory
+     * @param trustManager the trust manager
+     * @return the builder
+     */
+    public Builder sslSocketFactory(SSLSocketFactory sslSocketFactory,
+        X509TrustManager trustManager) {
+      this.clientBuilder.sslSocketFactory(sslSocketFactory, trustManager);
+      return this;
+    }
+
+    /**
      * Constructs an {@link EventSource} using the builder's current properties.
      * @return the new EventSource instance
      */
     public EventSource build() {
       if (proxy != null) {
         clientBuilder.proxy(proxy);
-      }
-
-      try {
-        clientBuilder.sslSocketFactory(new ModernTLSSocketFactory(), defaultTrustManager());
-      } catch (GeneralSecurityException e) {
-        // TLS is not available, so don't set up the socket factory, swallow the exception
       }
 
       if (proxyAuthenticator != null) {

@@ -1,6 +1,5 @@
 package com.launchdarkly.eventsource;
 
-
 import org.junit.Test;
 
 import java.util.concurrent.ArrayBlockingQueue;

@@ -1,5 +1,5 @@
 apply plugin: 'java'
-apply plugin: 'maven'
+apply plugin: 'maven-publish'
 apply plugin: 'signing'
 apply plugin: 'idea'
 apply plugin: 'io.codearte.nexus-staging'
@@ -48,7 +48,6 @@ buildscript {
     }
 }
 
-// custom tasks for creating source/javadoc jars
 task sourcesJar(type: Jar, dependsOn: classes) {
     classifier = 'sources'
     from sourceSets.main.allSource
@@ -59,21 +58,12 @@ task javadocJar(type: Jar, dependsOn: javadoc) {
     from javadoc.destinationDir
 }
 
-// add javadoc/source jar tasks as artifacts
-artifacts {
-    archives sourcesJar, javadocJar
-}
-
 test {
     testLogging {
         events "passed", "skipped", "failed", "standardOut", "standardError"
         showStandardStreams = true
         exceptionFormat = 'full'
     }
-}
-
-signing {
-    sign configurations.archives
 }
 
 idea {
@@ -87,45 +77,54 @@ nexusStaging {
     packageGroup = "com.launchdarkly"
 }
 
-uploadArchives {
-    repositories {
-        mavenDeployer {
-            beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            groupId = 'com.launchdarkly'
+            artifactId = 'okhttp-eventsource'
 
-            repository(url: "https://oss.sonatype.org/service/local/staging/deploy/maven2/") {
-                authentication(userName: ossrhUsername, password: ossrhPassword)
-            }
-
-            snapshotRepository(url: "https://oss.sonatype.org/content/repositories/snapshots/") {
-                authentication(userName: ossrhUsername, password: ossrhPassword)
-            }
-
-            pom.project {
-                name 'okhttp-eventsource'
-                packaging 'jar'
-                description 'EventSource Implementation built on OkHttp'
-                url 'https://github.com/launchdarkly/okhttp-eventsource'
-
-                scm {
-                    connection 'scm:git:https://github.com/launchdarkly/okhttp-eventsource'
-                    developerConnection 'scm:git:https://github.com/launchdarkly/okhttp-eventsource'
-                    url 'https://github.com/launchdarkly/okhttp-eventsource'
-                }
-
+            artifact jar
+            artifact sourcesJar
+            artifact javadocJar
+            
+            pom {
+                name = 'okhttp-eventsource'
+                description = 'EventSource Implementation built on OkHttp'
+                url = 'https://github.com/launchdarkly/okhttp-eventsource'
                 licenses {
                     license {
-                        name 'The Apache License, Version 2.0'
-                        url 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                        name = 'The Apache License, Version 2.0'
+                        url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
                     }
                 }
-
                 developers {
                     developer {
-                        name 'LaunchDarkly'
-                        email 'team@launchdarkly.com'
+                        name = 'LaunchDarkly'
+                        email = 'team@launchdarkly.com'
                     }
+                }
+                scm {
+                    connection = 'scm:git:git://github.com/launchdarkly/okhttp-eventsource.git'
+                    developerConnection = 'scm:git:ssh:git@github.com:launchdarkly/okhttp-eventsource.git'
+                    url = 'http://example.com/my-library/'
                 }
             }
         }
     }
+    repositories {
+        mavenLocal()
+        maven {
+            def releasesRepoUrl = "https://oss.sonatype.org/service/local/staging/deploy/maven2/"
+            def snapshotsRepoUrl = "https://oss.sonatype.org/content/repositories/snapshots/"
+            url = version.endsWith('SNAPSHOT') ? snapshotsRepoUrl : releasesRepoUrl
+            credentials {
+                username ossrhUsername
+                password ossrhPassword
+            }
+        }
+    }
+}
+
+signing {
+    sign publishing.publications.mavenJava
 }

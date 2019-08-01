@@ -5,6 +5,7 @@ import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import okhttp3.OkHttpClient.Builder;
 import okio.Buffer;
 import org.junit.Assert;
 import org.junit.Before;
@@ -15,6 +16,7 @@ import java.io.IOException;
 import java.net.Proxy;
 import java.net.URI;
 import java.nio.charset.Charset;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
@@ -174,6 +176,19 @@ public class EventSourceTest {
     assertEquals(writeTimeout, client.writeTimeoutMillis());
   }
 
+  @Test
+  public void customBuilderActions() {
+    final int writeTimeout = 9999;
+    builder.clientBuilderActions(new EventSource.Builder.ClientConfigurer() {
+      public void configure(Builder b) {
+        b.writeTimeout(writeTimeout, TimeUnit.MILLISECONDS);
+      }
+    });
+    OkHttpClient client = builder.getClientBuilder().build();
+
+    assertEquals(writeTimeout, client.writeTimeoutMillis());
+  }
+  
   @Test
   public void customMethod() throws IOException {
     builder.method("report");

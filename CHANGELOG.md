@@ -2,6 +2,11 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [1.10.0] - 2019-08-01
+### Added:
+- `EventSource.Builder.clientBuilderActions()` allows you to modify the OkHttp client options in any way, such as customizing TLS behavior or any other methods supported by `OkHttpClient.Builder`.
+- The CI tests now include end-to-end tests against an embedded HTTP server.
+
 ## [1.9.1] - 2019-03-20
 ### Fixed:
 - Removed JSR305 annotations such as `@Nullable`. JSR305 is unsupported and obsolete, and can cause [problems](https://blog.codefx.org/java/jsr-305-java-9/) in Java 9.

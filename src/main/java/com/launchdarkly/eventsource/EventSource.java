@@ -556,7 +556,7 @@ public class EventSource implements ConnectionHandler, Closeable {
       this.clientBuilder = createInitialClientBuilder();
     }
     
-    private OkHttpClient.Builder createInitialClientBuilder() {
+    private static OkHttpClient.Builder createInitialClientBuilder() {
       OkHttpClient.Builder b = new OkHttpClient.Builder()
           .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
           .connectTimeout(DEFAULT_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)

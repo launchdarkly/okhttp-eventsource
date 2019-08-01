@@ -1,16 +1,7 @@
 package com.launchdarkly.eventsource;
 
-import javax.net.ssl.SSLSocketFactory;
-import okhttp3.*;
-import okio.BufferedSource;
-import okio.Okio;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.TrustManagerFactory;
-import javax.net.ssl.X509TrustManager;
 
 import java.io.Closeable;
 import java.io.EOFException;
@@ -26,12 +17,36 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
-import java.util.concurrent.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static com.launchdarkly.eventsource.ReadyState.*;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509TrustManager;
+
+import static com.launchdarkly.eventsource.ReadyState.CLOSED;
+import static com.launchdarkly.eventsource.ReadyState.CONNECTING;
+import static com.launchdarkly.eventsource.ReadyState.OPEN;
+import static com.launchdarkly.eventsource.ReadyState.RAW;
+import static com.launchdarkly.eventsource.ReadyState.SHUTDOWN;
 import static java.lang.String.format;
+
+import okhttp3.Authenticator;
+import okhttp3.Call;
+import okhttp3.ConnectionPool;
+import okhttp3.Headers;
+import okhttp3.HttpUrl;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import okio.BufferedSource;
+import okio.Okio;
 
 /**
  * Client for <a href="https://www.w3.org/TR/2015/REC-eventsource-20150203/">Server-Sent Events</a>
@@ -507,20 +522,8 @@ public class EventSource implements ConnectionHandler, Closeable {
     private String method = "GET";
     private RequestTransformer requestTransformer = null;
     private RequestBody body = null;
-    private OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
-            .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
-            .connectTimeout(DEFAULT_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            .readTimeout(DEFAULT_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            .writeTimeout(DEFAULT_WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            .retryOnConnectionFailure(true);
-    {
-      try {
-        clientBuilder.sslSocketFactory(new ModernTLSSocketFactory(), defaultTrustManager());
-      } catch (GeneralSecurityException e) {
-        // TLS is not available, so don't set up the socket factory, swallow the exception
-      }
-    }
-
+    private OkHttpClient.Builder clientBuilder;
+    
     /**
      * Creates a new builder.
      * 
@@ -550,6 +553,22 @@ public class EventSource implements ConnectionHandler, Closeable {
       }
       this.url = url;
       this.handler = handler;
+      this.clientBuilder = createInitialClientBuilder();
+    }
+    
+    private static OkHttpClient.Builder createInitialClientBuilder() {
+      OkHttpClient.Builder b = new OkHttpClient.Builder()
+          .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
+          .connectTimeout(DEFAULT_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+          .readTimeout(DEFAULT_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+          .writeTimeout(DEFAULT_WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+          .retryOnConnectionFailure(true);
+      try {
+        b.sslSocketFactory(new ModernTLSSocketFactory(), defaultTrustManager());
+      } catch (GeneralSecurityException e) {
+        // TLS is not available, so don't set up the socket factory, swallow the exception
+      }
+      return b;
     }
     
     /**
@@ -761,18 +780,38 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
 
     /**
-     * Sets the {@link SSLSocketFactory} for making TLS connections.
-     *
-     * @param sslSocketFactory the ssl socket factory
-     * @param trustManager the trust manager
+     * Specifies any type of configuration actions you want to perform on the OkHttpClient builder.
+     * <p>
+     * {@link ClientConfigurer} is an interface with a single method, {@link ClientConfigurer#configure(okhttp3.OkHttpClient.Builder)},
+     * that will be called with the {@link okhttp3.OkHttpClient.Builder} instance being used by EventSource.
+     * In Java 8, this can be a lambda.
+     * <p>
+     * It is not guaranteed to be called in any particular order relative to other configuration
+     * actions specified by this Builder, so if you are using more than one method, do not attempt
+     * to overwrite the same setting in two ways.
+     * <p>
+     * <pre><code>
+     *     // Java 8 example (lambda)
+     *     eventSourceBuilder.clientBuilderActions(b -> {
+     *         b.sslSocketFactory(mySocketFactory, myTrustManager);
+     *     });
+     * 
+     *     // Java 7 example (anonymous class)
+     *     eventSourceBuilder.clientBuilderActions(new EventSource.Builder.ClientConfigurer() {
+     *         public void configure(OkHttpClient.Builder v) {
+     *             b.sslSocketFactory(mySocketFactory, myTrustManager);
+     *         }
+     *     });
+     * </code></pre>
+     * @param configurer a ClientConfigurer (or lambda) that will act on the HTTP client builder
      * @return the builder
+     * @since 1.10.0
      */
-    public Builder sslSocketFactory(SSLSocketFactory sslSocketFactory,
-        X509TrustManager trustManager) {
-      this.clientBuilder.sslSocketFactory(sslSocketFactory, trustManager);
+    public Builder clientBuilderActions(ClientConfigurer configurer) {
+      configurer.configure(clientBuilder);
       return this;
     }
-
+    
     /**
      * Constructs an {@link EventSource} using the builder's current properties.
      * @return the new EventSource instance
@@ -803,6 +842,19 @@ public class EventSource implements ConnectionHandler, Closeable {
                 + Arrays.toString(trustManagers));
       }
       return (X509TrustManager) trustManagers[0];
+    }
+    
+    /**
+     * An interface for use with {@link EventSource.Builder#clientBuilderActions(ClientConfigurer)}.
+     * @since 1.10.0
+     */
+    public static interface ClientConfigurer {
+      /**
+       * This method is called with the OkHttp {@link okhttp3.OkHttpClient.Builder} that will be used for
+       * the EventSource, allowing you to call any configuration methods you want.
+       * @param builder the client builder
+       */
+      public void configure(OkHttpClient.Builder builder);
     }
   }
 }

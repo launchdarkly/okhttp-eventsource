@@ -789,10 +789,9 @@ public class EventSource implements ConnectionHandler, Closeable {
      * It is not guaranteed to be called in any particular order relative to other configuration
      * actions specified by this Builder, so if you are using more than one method, do not attempt
      * to overwrite the same setting in two ways.
-     * <p>
      * <pre><code>
      *     // Java 8 example (lambda)
-     *     eventSourceBuilder.clientBuilderActions(b -> {
+     *     eventSourceBuilder.clientBuilderActions(b -&gt; {
      *         b.sslSocketFactory(mySocketFactory, myTrustManager);
      *     });
      * 

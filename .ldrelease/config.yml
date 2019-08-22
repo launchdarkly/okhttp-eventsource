@@ -1,0 +1,12 @@
+repo:
+  public: okhttp-eventsource
+  private: okhttp-eventsource-private
+
+publications:
+  - url: https://oss.sonatype.org/content/groups/public/com/launchdarkly/okhttp-eventsource/
+    description: Sonatype
+  - url: https://javadoc.io/doc/com.launchdarkly/okhttp-eventsource
+    description: documentation (javadoc.io)
+
+template:
+  name: gradle

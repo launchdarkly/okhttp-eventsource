@@ -1,5 +1,7 @@
 package com.launchdarkly.eventsource;
 
+import okhttp3.Protocol;
+import okhttp3.Request;
 import okhttp3.Response;
 
 /**
@@ -14,8 +16,9 @@ public class UnsuccessfulResponseException extends Exception {
    * Constructs an exception instance.
    * @param code the HTTP status
    */
+  @Deprecated
   public UnsuccessfulResponseException(int code) {
-    this(new Response.Builder().code(code).build());
+    this(buildSurrogateResponse(code));
   }
 
   /**
@@ -41,5 +44,21 @@ public class UnsuccessfulResponseException extends Exception {
    */
   public Response getResponse() {
     return response;
+  }
+
+  /**
+   * Used for backward compatibility only: provide surrogate response for a given code
+   */
+  @Deprecated
+  private static Response buildSurrogateResponse(int code) {
+    return new Response.Builder()
+      .request(new Request.Builder()
+        .url("http://example.com")
+        .build()
+      )
+      .protocol(Protocol.HTTP_1_1)
+      .message("")
+      .code(code)
+      .build();
   }
 }

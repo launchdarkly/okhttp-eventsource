@@ -256,7 +256,7 @@ public class EventSource implements ConnectionHandler, Closeable {
             }
           } else {
             logger.debug("Unsuccessful Response: " + response);
-            errorHandlerAction = dispatchError(new UnsuccessfulResponseException(response.code()));
+            errorHandlerAction = dispatchError(new UnsuccessfulResponseException(response));
           }
         } catch (EOFException eofe) {
           logger.warn("Connection unexpectedly closed.");

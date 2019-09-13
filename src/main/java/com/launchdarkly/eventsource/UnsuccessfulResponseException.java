@@ -1,20 +1,30 @@
 package com.launchdarkly.eventsource;
 
+import okhttp3.Response;
+
 /**
  * Exception class that means the remote server returned an HTTP error.
  */
 @SuppressWarnings("serial")
 public class UnsuccessfulResponseException extends Exception {
 
-  private final int code;
+  private final Response response;
 
   /**
    * Constructs an exception instance.
    * @param code the HTTP status
    */
   public UnsuccessfulResponseException(int code) {
-    super("Unsuccessful response code received from stream: " + code);
-    this.code = code;
+    this(new Response.Builder().code(code).build());
+  }
+
+  /**
+   * Constructs an exception instance.
+   * @param response {@link Response} provided by server
+   */
+  public UnsuccessfulResponseException(Response response) {
+    super("Unsuccessful response code received from stream: " + response.code());
+    this.response = response;
   }
 
   /**
@@ -22,6 +32,14 @@ public class UnsuccessfulResponseException extends Exception {
    * @return the HTTP status
    */
   public int getCode() {
-    return code;
+    return response.code();
+  }
+
+  /**
+   * Returns the HTTP {@link Response}.
+   * @return the HTTP {@link Response}
+   */
+  public Response getResponse() {
+    return response;
   }
 }

@@ -103,7 +103,9 @@ public class EventSource implements ConnectionHandler, Closeable {
 
   EventSource(Builder builder) {
     this.name = builder.name;
-    this.logger = LoggerFactory.getLogger(EventSource.class.getCanonicalName() + "." + name);
+    String loggerName = EventSource.class.getCanonicalName() +
+        (name == null || name.equals("") ? "" : "." + name);
+    this.logger = LoggerFactory.getLogger(loggerName);
     this.url = builder.url;
     this.headers = addDefaultHeaders(builder.headers);
     this.method = builder.method;

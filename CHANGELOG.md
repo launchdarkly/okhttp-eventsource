@@ -2,6 +2,12 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [1.10.1] - 2019-10-17
+### Fixed:
+- Fixed trailing period in logger name. ([#34](https://github.com/launchdarkly/okhttp-eventsource/issues/34))
+- If you provide your own value for the `Accept` header using `EventSource.Builder.headers()`, it should not _also_ send the default `Accept: text/event-stream`, but replace it. ([#38](https://github.com/launchdarkly/okhttp-eventsource/issues/38))
+
+
 ## [1.10.0] - 2019-08-01
 ### Added:
 - `EventSource.Builder.clientBuilderActions()` allows you to modify the OkHttp client options in any way, such as customizing TLS behavior or any other methods supported by `OkHttpClient.Builder`.

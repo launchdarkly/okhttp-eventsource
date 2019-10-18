@@ -1,5 +1,6 @@
 package com.launchdarkly.eventsource;
 
+import okhttp3.Headers;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -16,6 +17,7 @@ import java.io.IOException;
 import java.net.Proxy;
 import java.net.URI;
 import java.nio.charset.Charset;
+import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
@@ -214,5 +216,31 @@ public class EventSourceTest {
     Request req = builder.build().buildRequest();
     assertEquals("GET", req.method());
     assertEquals(null, req.body());
+  }
+  
+  @Test
+  public void customHeaders() throws IOException {
+    Headers headers = new Headers.Builder()
+        .add("header1", "value1").add("header1", "value2")
+        .add("header2", "value1")
+        .build();
+    builder.headers(headers);
+    Request req = builder.build().buildRequest();
+    assertEquals(Arrays.<String>asList("value1", "value2"), req.headers().values("header1"));
+    assertEquals(Arrays.<String>asList("value1"), req.headers().values("header2"));
+    assertEquals(Arrays.<String>asList("text/event-stream"), req.headers().values("Accept"));
+    assertEquals(Arrays.<String>asList("no-cache"), req.headers().values("Cache-Control"));
+  }
+  
+  @Test
+  public void customHeadersOverwritingDefaults() throws IOException {
+    Headers headers = new Headers.Builder()
+        .add("Accept", "text/plain")
+        .add("header2", "value1")
+        .build();
+    builder.headers(headers);
+    Request req = builder.build().buildRequest();
+    assertEquals(Arrays.<String>asList("text/plain"), req.headers().values("Accept"));
+    assertEquals(Arrays.<String>asList("value1"), req.headers().values("header2"));
   }
 }

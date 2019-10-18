@@ -80,6 +80,9 @@ public class EventSource implements ConnectionHandler, Closeable {
    */
   public static final int DEFAULT_BACKOFF_RESET_THRESHOLD_MS = 1000 * 60;
 
+  private static final Headers defaultHeaders =
+      new Headers.Builder().add("Accept", "text/event-stream").add("Cache-Control", "no-cache").build();
+  
   private final String name;
   private volatile HttpUrl url;
   private final Headers headers;
@@ -103,7 +106,9 @@ public class EventSource implements ConnectionHandler, Closeable {
 
   EventSource(Builder builder) {
     this.name = builder.name;
-    this.logger = LoggerFactory.getLogger(EventSource.class.getCanonicalName() + "." + name);
+    String loggerName = EventSource.class.getCanonicalName() +
+        (name == null || name.equals("") ? "" : "." + name);
+    this.logger = LoggerFactory.getLogger(loggerName);
     this.url = builder.url;
     this.headers = addDefaultHeaders(builder.headers);
     this.method = builder.method;
@@ -364,11 +369,17 @@ public class EventSource implements ConnectionHandler, Closeable {
   private static Headers addDefaultHeaders(Headers custom) {
     Headers.Builder builder = new Headers.Builder();
 
-    builder.add("Accept", "text/event-stream").add("Cache-Control", "no-cache");
+    for (String name : defaultHeaders.names()) {
+      if (!custom.names().contains(name)) { // skip the default if they set any custom values for this key
+        for (String value: defaultHeaders.values(name)) {
+          builder.add(name, value);         
+        }
+      }
+    }
 
-    for (Map.Entry<String, List<String>> header : custom.toMultimap().entrySet()) {
-      for (String value : header.getValue()) {
-        builder.add(header.getKey(), value);
+    for (String name : custom.names()) {
+      for (String value : custom.values(name)) {
+        builder.add(name, value);
       }
     }
 

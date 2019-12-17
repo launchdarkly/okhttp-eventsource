@@ -1,24 +1,22 @@
 package com.launchdarkly.eventsource;
 
-import okhttp3.Headers;
-import okhttp3.HttpUrl;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.OkHttpClient.Builder;
-import okio.Buffer;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Ignore;
-import org.junit.Test;
-
 import java.io.IOException;
 import java.net.Proxy;
 import java.net.URI;
 import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
+import okhttp3.Headers;
+import okhttp3.HttpUrl;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.OkHttpClient.Builder;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okio.Buffer;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
@@ -47,18 +45,18 @@ public class EventSourceTest {
     EventSource es = new EventSource.Builder(mock(EventHandler.class), STREAM_HTTP_URL).build();
     assertEquals(STREAM_URI, es.getUri());
   }
-  
+
   @Test
   public void hasExpectedHttpUrlWhenInitializedWithUri() {
     assertEquals(STREAM_HTTP_URL, eventSource.getHttpUrl());
   }
-  
+
   @Test
   public void hasExpectedHttpUrlWhenInitializedWithHttpUrl() {
     EventSource es = new EventSource.Builder(mock(EventHandler.class), STREAM_HTTP_URL).build();
     assertEquals(STREAM_HTTP_URL, es.getHttpUrl());
   }
-  
+
   @Test(expected=IllegalArgumentException.class)
   public void handlerCannotBeNull() {
     new EventSource.Builder(null, STREAM_URI);
@@ -97,31 +95,10 @@ public class EventSourceTest {
     eventSource.setHttpUrl(url);
     assertEquals(url, eventSource.getHttpUrl());
   }
-  
+
   @Test(expected=IllegalArgumentException.class)
   public void cannotSetHttpUrlToNull() {
     eventSource.setHttpUrl(null);
-  }
-  
-  @Test
-  public void respectsDefaultMaximumBackoffTime() {
-    eventSource.setReconnectionTimeMs(2000);
-    assertEquals(EventSource.DEFAULT_MAX_RECONNECT_TIME_MS, eventSource.getMaxReconnectTimeMs());
-    Assert.assertTrue(eventSource.backoffWithJitter(300) < eventSource.getMaxReconnectTimeMs());
-  }
-
-  @Test
-  public void respectsCustomMaximumBackoffTime() {
-    eventSource.setReconnectionTimeMs(2000);
-    eventSource.setMaxReconnectTimeMs(5000);
-    Assert.assertTrue(eventSource.backoffWithJitter(300) < eventSource.getMaxReconnectTimeMs());
-  }
-
-  @Ignore("Useful for inspecting jitter values empirically")
-  public void inspectJitter() {
-    for (int i = 0; i < 100; i++) {
-      System.out.println("With jitter, retry " + i + ": " + eventSource.backoffWithJitter(i));
-    }
   }
 
   @Test
@@ -190,7 +167,7 @@ public class EventSourceTest {
 
     assertEquals(writeTimeout, client.writeTimeoutMillis());
   }
-  
+
   @Test
   public void customMethod() throws IOException {
     builder.method("report");
@@ -217,7 +194,7 @@ public class EventSourceTest {
     assertEquals("GET", req.method());
     assertEquals(null, req.body());
   }
-  
+
   @Test
   public void customHeaders() throws IOException {
     Headers headers = new Headers.Builder()
@@ -231,7 +208,7 @@ public class EventSourceTest {
     assertEquals(Arrays.<String>asList("text/event-stream"), req.headers().values("Accept"));
     assertEquals(Arrays.<String>asList("no-cache"), req.headers().values("Cache-Control"));
   }
-  
+
   @Test
   public void customHeadersOverwritingDefaults() throws IOException {
     Headers headers = new Headers.Builder()

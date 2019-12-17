@@ -82,7 +82,7 @@ public class EventSource implements ConnectionHandler, Closeable {
 
   private static final Headers defaultHeaders =
       new Headers.Builder().add("Accept", "text/event-stream").add("Cache-Control", "no-cache").build();
-  
+
   private final String name;
   private volatile HttpUrl url;
   private final Headers headers;
@@ -91,16 +91,13 @@ public class EventSource implements ConnectionHandler, Closeable {
   private final RequestTransformer requestTransformer;
   private final ExecutorService eventExecutor;
   private final ExecutorService streamExecutor;
-  private long reconnectTimeMs;
-  private long maxReconnectTimeMs;
-  private final long backoffResetThresholdMs;
   private volatile String lastEventId;
   private final EventHandler handler;
   private final ConnectionErrorHandler connectionErrorHandler;
   private final AtomicReference<ReadyState> readyState;
   private final OkHttpClient client;
   private volatile Call call;
-  private final Random jitter = new Random();
+  private final BackoffCalculator backoffCalculator;
   private Response response;
   private BufferedSource bufferedSource;
 
@@ -114,15 +111,16 @@ public class EventSource implements ConnectionHandler, Closeable {
     this.method = builder.method;
     this.body = builder.body;
     this.requestTransformer = builder.requestTransformer;
-    this.reconnectTimeMs = builder.reconnectTimeMs;
-    this.maxReconnectTimeMs = builder.maxReconnectTimeMs;
-    this.backoffResetThresholdMs = builder.backoffResetThresholdMs;
     ThreadFactory eventsThreadFactory = createThreadFactory("okhttp-eventsource-events");
     this.eventExecutor = Executors.newSingleThreadExecutor(eventsThreadFactory);
     ThreadFactory streamThreadFactory = createThreadFactory("okhttp-eventsource-stream");
     this.streamExecutor = Executors.newSingleThreadExecutor(streamThreadFactory);
     this.handler = new AsyncEventHandler(this.eventExecutor, builder.handler);
     this.connectionErrorHandler = builder.connectionErrorHandler;
+    this.backoffCalculator = new BackoffCalculator(
+        builder.maxReconnectTimeMs,
+        builder.reconnectTimeMs,
+        builder.backoffResetThresholdMs);
     this.readyState = new AtomicReference<>(RAW);
     this.client = builder.clientBuilder.build();
   }
@@ -206,7 +204,7 @@ public class EventSource implements ConnectionHandler, Closeable {
       }
     }
   }
-  
+
   Request buildRequest() {
     Request.Builder builder = new Request.Builder()
         .headers(headers)
@@ -216,7 +214,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     if (lastEventId != null && !lastEventId.isEmpty()) {
       builder.addHeader("Last-Event-ID", lastEventId);
     }
-    
+
     Request request = builder.build();
     return requestTransformer == null ? request : requestTransformer.transformRequest(request);
   }
@@ -225,16 +223,15 @@ public class EventSource implements ConnectionHandler, Closeable {
     response = null;
     bufferedSource = null;
 
-    int reconnectAttempts = 0;
     ConnectionErrorHandler.Action errorHandlerAction = null;
-    
+
     try {
       while (!Thread.currentThread().isInterrupted() && readyState.get() != SHUTDOWN) {
         long connectedTime = -1;
 
         ReadyState currentState = readyState.getAndSet(CONNECTING);
         logger.debug("readyState change: " + currentState + " -> " + CONNECTING);
-        try {        	  
+        try {
           call = client.newCall(buildRequest());
           response = call.execute();
           if (response.isSuccessful()) {
@@ -302,12 +299,11 @@ public class EventSource implements ConnectionHandler, Closeable {
               handler.onError(e);
             }
           }
-          // Reset the backoff if we had a successful connection that stayed good for at least
-          // backoffResetThresholdMs milliseconds.
-          if (connectedTime >= 0 && (System.currentTimeMillis() - connectedTime) >= backoffResetThresholdMs) {
-            reconnectAttempts = 0;
-          }
-          maybeWaitWithBackoff(++reconnectAttempts);
+
+          long connectedDuration = connectedTime >= 0
+            ? System.currentTimeMillis() - connectedTime
+            : 0;
+          maybeWait(backoffCalculator.delayAfterConnectedFor(connectedDuration));
         }
       }
     } catch (RejectedExecutionException ignored) {
@@ -327,43 +323,15 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
     return action;
   }
-  
-  private void maybeWaitWithBackoff(int reconnectAttempts) {
-    if (reconnectTimeMs > 0 && reconnectAttempts > 0) {
+
+  private void maybeWait(long sleepTimeMs) {
+    if (sleepTimeMs > 0) {
       try {
-        long sleepTimeMs = backoffWithJitter(reconnectAttempts);
         logger.info("Waiting " + sleepTimeMs + " milliseconds before reconnecting...");
         Thread.sleep(sleepTimeMs);
       } catch (InterruptedException ignored) {
       }
     }
-  }
-
-  long backoffWithJitter(int reconnectAttempts) {
-    long jitterVal = Math.min(maxReconnectTimeMs, reconnectTimeMs * pow2(reconnectAttempts));
-    return jitterVal / 2 + nextLong(jitter, jitterVal) / 2;
-  }
-
-  // Returns 2**k, or Integer.MAX_VALUE if 2**k would overflow
-  private int pow2(int k) {
-    return (k < Integer.SIZE - 1) ? (1 << k) : Integer.MAX_VALUE;
-  }
-
-  // Adapted from http://stackoverflow.com/questions/2546078/java-random-long-number-in-0-x-n-range
-  // Since ThreadLocalRandom.current().nextLong(n) requires Android 5
-  private long nextLong(Random rand, long bound) {
-    if (bound <= 0) {
-      throw new IllegalArgumentException("bound must be positive");
-    }
-
-    long r = rand.nextLong() & Long.MAX_VALUE;
-    long m = bound - 1L;
-    if ((bound & m) == 0) { // i.e., bound is a power of 2
-      r = (bound * r) >> (Long.SIZE - 1);
-    } else {
-      for (long u = r; u - (r = u % bound) + m < 0L; u = rand.nextLong() & Long.MAX_VALUE) ;
-    }
-    return r;
   }
 
   private static Headers addDefaultHeaders(Headers custom) {
@@ -372,7 +340,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     for (String name : defaultHeaders.names()) {
       if (!custom.names().contains(name)) { // skip the default if they set any custom values for this key
         for (String value: defaultHeaders.values(name)) {
-          builder.add(name, value);         
+          builder.add(name, value);
         }
       }
     }
@@ -398,7 +366,7 @@ public class EventSource implements ConnectionHandler, Closeable {
    * @see #DEFAULT_RECONNECT_TIME_MS
    */
   public void setReconnectionTimeMs(long reconnectionTimeMs) {
-    this.reconnectTimeMs = reconnectionTimeMs;
+    backoffCalculator.setReconnectTimeMs(reconnectionTimeMs);
   }
 
   /**
@@ -410,7 +378,7 @@ public class EventSource implements ConnectionHandler, Closeable {
    * @see #DEFAULT_MAX_RECONNECT_TIME_MS
    */
   public void setMaxReconnectTimeMs(long maxReconnectTimeMs) {
-    this.maxReconnectTimeMs = maxReconnectTimeMs;
+    backoffCalculator.setMaxReconnectTimeMs(maxReconnectTimeMs);
   }
 
   /**
@@ -418,7 +386,7 @@ public class EventSource implements ConnectionHandler, Closeable {
    * @return the maximum delay in milliseconds
    */
   public long getMaxReconnectTimeMs() {
-    return this.maxReconnectTimeMs;
+    return backoffCalculator.getMaxReconnectTimeMs();
   }
 
   /**
@@ -440,7 +408,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   public HttpUrl getHttpUrl() {
     return this.url;
   }
-  
+
   /**
    * Returns the current stream endpoint as a java.net.URI.
    * @return the endpoint URI
@@ -454,12 +422,12 @@ public class EventSource implements ConnectionHandler, Closeable {
   /**
    * Changes the stream endpoint. This change will not take effect until the next time the
    * EventSource attempts to make a connection.
-   * 
+   *
    * @param url the new endpoint, as an OkHttp HttpUrl
    * @throws IllegalArgumentException if the parameter is null or if the scheme is not HTTP or HTTPS
    * @see #getHttpUrl()
    * @see #setUri(URI)
-   * 
+   *
    * @since 1.9.0
    */
   public void setHttpUrl(HttpUrl url) {
@@ -468,11 +436,11 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
     this.url = url;
   }
-  
+
   /**
    * Changes the stream endpoint. This change will not take effect until the next time the
    * EventSource attempts to make a connection.
-   * 
+   *
    * @param uri the new endpoint, as a java.net.URI
    * @throws IllegalArgumentException if the parameter is null or if the scheme is not HTTP or HTTPS
    * @see #getUri()
@@ -485,7 +453,7 @@ public class EventSource implements ConnectionHandler, Closeable {
   private static IllegalArgumentException badUrlException() {
     return new IllegalArgumentException("URI/URL must not be null and must be HTTP or HTTPS");
   }
-  
+
   /**
    * Interface for an object that can modify the network request that the EventSource will make.
    * Use this in conjunction with {@link Builder#requestTransformer(RequestTransformer)} if you need to set request
@@ -498,24 +466,24 @@ public class EventSource implements ConnectionHandler, Closeable {
    *     return input.newBuilder().tag("hello").build();
    *   }
    * }
-   * 
+   *
    * EventSource es = new EventSource.Builder(handler, uri).requestTransformer(new RequestTagger()).build();
    * </code>
-   * 
+   *
    * @since 1.9.0
    */
-  public static interface RequestTransformer {
+  public interface RequestTransformer {
     /**
      * Returns a request that is either the same as the input request or based on it. When
      * this method is called, EventSource has already set all of its standard properties on
      * the request.
-     * 
+     *
      * @param input the original request
      * @return the request that will be used
      */
-    public Request transformRequest(Request input);
+    Request transformRequest(Request input);
   }
-  
+
   /**
    * Builder for {@link EventSource}.
    */
@@ -534,10 +502,10 @@ public class EventSource implements ConnectionHandler, Closeable {
     private RequestTransformer requestTransformer = null;
     private RequestBody body = null;
     private OkHttpClient.Builder clientBuilder;
-    
+
     /**
      * Creates a new builder.
-     * 
+     *
      * @param handler the event handler
      * @param uri the endpoint as a java.net.URI
      * @throws IllegalArgumentException if either argument is null, or if the endpoint is not HTTP or HTTPS
@@ -548,11 +516,11 @@ public class EventSource implements ConnectionHandler, Closeable {
 
     /**
      * Creates a new builder.
-     * 
+     *
      * @param handler the event handler
      * @param url the endpoint as an OkHttp HttpUrl
      * @throws IllegalArgumentException if either argument is null, or if the endpoint is not HTTP or HTTPS
-     * 
+     *
      * @since 1.9.0
      */
     public Builder(EventHandler handler, HttpUrl url) {
@@ -566,7 +534,7 @@ public class EventSource implements ConnectionHandler, Closeable {
       this.handler = handler;
       this.clientBuilder = createInitialClientBuilder();
     }
-    
+
     private static OkHttpClient.Builder createInitialClientBuilder() {
       OkHttpClient.Builder b = new OkHttpClient.Builder()
           .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
@@ -581,7 +549,7 @@ public class EventSource implements ConnectionHandler, Closeable {
       }
       return b;
     }
-    
+
     /**
      * Set the HTTP method used for this EventSource client to use for requests to establish the EventSource.
      *
@@ -609,17 +577,17 @@ public class EventSource implements ConnectionHandler, Closeable {
 
     /**
      * Specifies an object that will be used to customize outgoing requests. See {@link RequestTransformer} for details.
-     * 
+     *
      * @param requestTransformer the transformer object
      * @return the builder
-     * 
+     *
      * @since 1.9.0
      */
     public Builder requestTransformer(RequestTransformer requestTransformer) {
       this.requestTransformer = requestTransformer;
       return this;
     }
-    
+
     /**
      * Set the name for this EventSource client to be used when naming the logger and threadpools. This is mainly useful when
      * multiple EventSource clients exist within the same process.
@@ -669,12 +637,12 @@ public class EventSource implements ConnectionHandler, Closeable {
      * will be greater than the last delay; if it fails after the threshold, the delay will start over at
      * the initial minimum value. This prevents long delays from occurring on connections that are only
      * rarely restarted.
-     *   
+     *
      * @param backoffResetThresholdMs the minimum time in milliseconds that a connection must stay open to
-     *   avoid resetting the delay 
+     *   avoid resetting the delay
      * @return the builder
      * @see EventSource#DEFAULT_BACKOFF_RESET_THRESHOLD_MS
-     * 
+     *
      * @since 1.9.0
      */
     public Builder backoffResetThresholdMs(long backoffResetThresholdMs) {
@@ -805,7 +773,7 @@ public class EventSource implements ConnectionHandler, Closeable {
      *     eventSourceBuilder.clientBuilderActions(b -&gt; {
      *         b.sslSocketFactory(mySocketFactory, myTrustManager);
      *     });
-     * 
+     *
      *     // Java 7 example (anonymous class)
      *     eventSourceBuilder.clientBuilderActions(new EventSource.Builder.ClientConfigurer() {
      *         public void configure(OkHttpClient.Builder v) {
@@ -821,7 +789,7 @@ public class EventSource implements ConnectionHandler, Closeable {
       configurer.configure(clientBuilder);
       return this;
     }
-    
+
     /**
      * Constructs an {@link EventSource} using the builder's current properties.
      * @return the new EventSource instance
@@ -853,7 +821,7 @@ public class EventSource implements ConnectionHandler, Closeable {
       }
       return (X509TrustManager) trustManagers[0];
     }
-    
+
     /**
      * An interface for use with {@link EventSource.Builder#clientBuilderActions(ClientConfigurer)}.
      * @since 1.10.0

@@ -480,11 +480,11 @@ public class EventSource implements ConnectionHandler, Closeable {
   
   /**
    * Interface for an object that can modify the network request that the EventSource will make.
-   * Use this in conjunction with {@link Builder#requestTransformer(RequestTransformer)} if you need to set request
-   * properties other than the ones that are already supported by the builder (or if, for
-   * whatever reason, you need to determine the request properties dynamically rather than
-   * setting them to fixed values initially). For example:
-   * <code>
+   * Use this in conjunction with {@link EventSource.Builder#requestTransformer(EventSource.RequestTransformer)}
+   * if you need to set request properties other than the ones that are already supported by the builder (or if,
+   * for whatever reason, you need to determine the request properties dynamically rather than setting them
+   * to fixed values initially). For example:
+   * <pre><code>
    * public class RequestTagger implements EventSource.RequestTransformer {
    *   public Request transformRequest(Request input) {
    *     return input.newBuilder().tag("hello").build();
@@ -492,7 +492,7 @@ public class EventSource implements ConnectionHandler, Closeable {
    * }
    * 
    * EventSource es = new EventSource.Builder(handler, uri).requestTransformer(new RequestTagger()).build();
-   * </code>
+   * </code></pre>
    * 
    * @since 1.9.0
    */

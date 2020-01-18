@@ -2,6 +2,12 @@ repo:
   public: okhttp-eventsource
   private: okhttp-eventsource-private
 
+releasableBranches:
+  - name: master
+    description: 2.x - for Java SDK 5.0+
+  - name: 1.x
+    description: for Java SDK <5.0
+
 publications:
   - url: https://oss.sonatype.org/content/groups/public/com/launchdarkly/okhttp-eventsource/
     description: Sonatype

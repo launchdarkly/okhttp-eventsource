@@ -4,8 +4,8 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-
 import java.net.URI;
+import java.time.Duration;
 
 import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.mock;
@@ -96,7 +96,7 @@ public class EventParserTest {
     parser.line("retry: 7000");
     parser.line("");
 
-    verify(connectionHandler).setReconnectionTimeMs(7000);
+    verify(connectionHandler).setReconnectionTime(Duration.ofMillis(7000));
   }
 
   @Test

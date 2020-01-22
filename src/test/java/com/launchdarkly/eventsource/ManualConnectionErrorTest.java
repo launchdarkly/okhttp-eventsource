@@ -7,6 +7,7 @@ import java.net.URI;
 import java.time.Duration;
 
 @Ignore
+@SuppressWarnings("javadoc")
 public class ManualConnectionErrorTest {
   EventSource source;
 

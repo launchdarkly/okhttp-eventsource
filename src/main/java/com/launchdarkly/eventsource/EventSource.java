@@ -51,7 +51,7 @@ import okio.Okio;
  * Client for <a href="https://www.w3.org/TR/2015/REC-eventsource-20150203/">Server-Sent Events</a>
  * aka EventSource
  */
-public class EventSource implements ConnectionHandler, Closeable {
+public class EventSource implements Closeable {
   private final Logger logger;
 
   /**
@@ -113,6 +113,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     this.method = builder.method;
     this.body = builder.body;
     this.requestTransformer = builder.requestTransformer;
+    this.lastEventId = builder.lastEventId;
     this.reconnectTime = builder.reconnectTime;
     this.maxReconnectTime = builder.maxReconnectTime;
     this.backoffResetThreshold = builder.backoffResetThreshold;
@@ -220,6 +221,18 @@ public class EventSource implements ConnectionHandler, Closeable {
     int reconnectAttempts = 0;
     ConnectionErrorHandler.Action errorHandlerAction = null;
     
+    ConnectionHandler connectionHandler = new ConnectionHandler() {
+      @Override
+      public void setReconnectionTime(Duration reconnectionTime) {
+        EventSource.this.setReconnectionTime(reconnectionTime);
+      }
+      
+      @Override
+      public void setLastEventId(String lastEventId) {
+        EventSource.this.setLastEventId(lastEventId);
+      }
+    };
+
     try {
       while (!Thread.currentThread().isInterrupted() && readyState.get() != SHUTDOWN) {
         long connectedTime = -1;
@@ -247,7 +260,7 @@ public class EventSource implements ConnectionHandler, Closeable {
               bufferedSource.close();
             }
             bufferedSource = Okio.buffer(response.body().source());
-            EventParser parser = new EventParser(url.uri(), handler, EventSource.this);
+            EventParser parser = new EventParser(url.uri(), handler, connectionHandler);
             for (String line; !Thread.currentThread().isInterrupted() && (line = bufferedSource.readUtf8LineStrict()) != null; ) {
               parser.line(line);
             }
@@ -378,56 +391,38 @@ public class EventSource implements ConnectionHandler, Closeable {
     return builder.build();
   }
 
-  /**
-   * Sets the minimum delay between connection attempts. The actual delay may be slightly less or
-   * greater, since there is a random jitter. When there is a connection failure, the delay will
-   * start at this value and will increase exponentially up to the {@link #setMaxReconnectTime(Duration)}
-   * value with each subsequent failure, unless it is reset as described in
-   * {@link Builder#backoffResetThreshold(Duration)}.
-   * @param reconnectionTime the minimum delay; null to use the default
-   * @see #setMaxReconnectTime(Duration)
-   * @see Builder#reconnectTime(Duration)
-   * @see #DEFAULT_RECONNECT_TIME
-   */
-  public void setReconnectionTime(Duration reconnectionTime) {
+  // setReconnectionTime and setLastEventId are used only by our internal ConnectionHandler, in response
+  // to stream events. From an application's point of view, these properties can only be set at
+  // configuration time via the builder.
+  private void setReconnectionTime(Duration reconnectionTime) {
     this.reconnectTime = reconnectionTime == null ? DEFAULT_RECONNECT_TIME : reconnectionTime;
   }
 
-  /**
-   * Sets the maximum delay between connection attempts. See {@link #setReconnectionTime(Duration)}.
-   * The default value is 30 seconds.
-   * @param maxReconnectTime the maximum delay; null to use the default
-   * @see #setReconnectionTime(Duration)
-   * @see Builder#maxReconnectTime(Duration)
-   * @see #DEFAULT_MAX_RECONNECT_TIME
-   */
-  public void setMaxReconnectTime(Duration maxReconnectTime) {
-    this.maxReconnectTime = maxReconnectTime == null ? DEFAULT_MAX_RECONNECT_TIME : maxReconnectTime;
-  }
-
-  /**
-   * Returns the current maximum reconnect delay as set by {@link #setReconnectionTime(Duration)}.
-   * @return the maximum delay
-   */
-  public Duration getMaxReconnectTime() {
-    return this.maxReconnectTime;
-  }
-
-  /**
-   * Sets the ID value of the last event received. This will be sent to the remote server on the
-   * next connection attempt.
-   * @param lastEventId the last event identifier
-   */
-  public void setLastEventId(String lastEventId) {
+  private void setLastEventId(String lastEventId) {
     this.lastEventId = lastEventId;
   }
 
   /**
+   * Returns the ID value, if any, of the last known event.
+   * <p>
+   * This can be set initially with {@link Builder#lastEventId(String)}, and is updated whenever an event
+   * is received that has an ID. Whether event IDs are supported depends on the server; it may ignore this
+   * value.
+   * 
+   * @return the last known event ID, or null
+   * @see Builder#lastEventId(String)
+   * @since 2.0.0
+   */
+  public String getLastEventId() {
+    return lastEventId;
+  }
+  
+  /**
    * Returns the current stream endpoint as an OkHttp HttpUrl.
+   * 
    * @return the endpoint URL
    * @since 1.9.0
    * @see #getUri()
-   * @see #setHttpUrl(HttpUrl)
    */
   public HttpUrl getHttpUrl() {
     return this.url;
@@ -435,49 +430,14 @@ public class EventSource implements ConnectionHandler, Closeable {
   
   /**
    * Returns the current stream endpoint as a java.net.URI.
+   * 
    * @return the endpoint URI
    * @see #getHttpUrl()
-   * @see #setUri(URI)
    */
   public URI getUri() {
     return this.url.uri();
   }
 
-  /**
-   * Changes the stream endpoint. This change will not take effect until the next time the
-   * EventSource attempts to make a connection.
-   * 
-   * @param url the new endpoint, as an OkHttp HttpUrl
-   * @throws IllegalArgumentException if the parameter is null or if the scheme is not HTTP or HTTPS
-   * @see #getHttpUrl()
-   * @see #setUri(URI)
-   * 
-   * @since 1.9.0
-   */
-  public void setHttpUrl(HttpUrl url) {
-    if (url == null) {
-      throw badUrlException();
-    }
-    this.url = url;
-  }
-  
-  /**
-   * Changes the stream endpoint. This change will not take effect until the next time the
-   * EventSource attempts to make a connection.
-   * 
-   * @param uri the new endpoint, as a java.net.URI
-   * @throws IllegalArgumentException if the parameter is null or if the scheme is not HTTP or HTTPS
-   * @see #getUri()
-   * @see #setHttpUrl(HttpUrl)
-   */
-  public void setUri(URI uri) {
-    setHttpUrl(uri == null ? null : HttpUrl.get(uri));
-  }
-
-  private static IllegalArgumentException badUrlException() {
-    return new IllegalArgumentException("URI/URL must not be null and must be HTTP or HTTPS");
-  }
-  
   /**
    * Interface for an object that can modify the network request that the EventSource will make.
    * Use this in conjunction with {@link EventSource.Builder#requestTransformer(EventSource.RequestTransformer)}
@@ -516,6 +476,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     private Duration reconnectTime = DEFAULT_RECONNECT_TIME;
     private Duration maxReconnectTime = DEFAULT_MAX_RECONNECT_TIME;
     private Duration backoffResetThreshold = DEFAULT_BACKOFF_RESET_THRESHOLD;
+    private String lastEventId;
     private final HttpUrl url;
     private final EventHandler handler;
     private ConnectionErrorHandler connectionErrorHandler = ConnectionErrorHandler.DEFAULT;
@@ -552,7 +513,7 @@ public class EventSource implements ConnectionHandler, Closeable {
         throw new IllegalArgumentException("handler must not be null");
       }
       if (url == null) {
-        throw badUrlException();
+        throw new IllegalArgumentException("URI/URL must not be null");
       }
       this.url = url;
       this.handler = handler;
@@ -576,7 +537,7 @@ public class EventSource implements ConnectionHandler, Closeable {
     
     /**
      * Set the HTTP method used for this EventSource client to use for requests to establish the EventSource.
-     *
+     * <p>
      * Defaults to "GET".
      *
      * @param method the HTTP method name
@@ -591,6 +552,7 @@ public class EventSource implements ConnectionHandler, Closeable {
 
     /**
      * Sets the request body to be used for this EventSource client to use for requests to establish the EventSource.
+     * 
      * @param body the body to use in HTTP requests
      * @return the builder
      */
@@ -627,15 +589,32 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
 
     /**
+     * Sets the ID value of the last event received.
+     * <p>
+     * This will be sent to the remote server on the initial connection request, allowing the server to
+     * skip past previously sent events if it supports this behavior. Once the connection is established,
+     * this value will be updated whenever an event is received that has an ID. Whether event IDs are
+     * supported depends on the server; it may ignore this value.
+     * 
+     * @param lastEventId the last event identifier
+     * @return the builder
+     * @since 2.0.0
+     */
+    public Builder lastEventId(String lastEventId) {
+      this.lastEventId = lastEventId;
+      return this;
+    }
+    
+    /**
      * Sets the minimum delay between connection attempts. The actual delay may be slightly less or
      * greater, since there is a random jitter. When there is a connection failure, the delay will
-     * start at this value and will increase exponentially up to the {@link #setMaxReconnectTime(Duration)}
+     * start at this value and will increase exponentially up to the {@link #maxReconnectTime(Duration)}
      * value with each subsequent failure, unless it is reset as described in
      * {@link Builder#backoffResetThreshold(Duration)}.
+     * 
      * @param reconnectTime the minimum delay; null to use the default
      * @return the builder
      * @see EventSource#DEFAULT_RECONNECT_TIME
-     * @see EventSource#setReconnectionTime(Duration)
      */
     public Builder reconnectTime(Duration reconnectTime) {
       this.reconnectTime = reconnectTime == null ? DEFAULT_RECONNECT_TIME : reconnectTime;
@@ -643,12 +622,12 @@ public class EventSource implements ConnectionHandler, Closeable {
     }
 
     /**
-     * Sets the maximum delay between connection attempts. See {@link #setReconnectionTime(Duration)}.
+     * Sets the maximum delay between connection attempts. See {@link #reconnectTime(Duration)}.
      * The default value is 30 seconds.
+     * 
      * @param maxReconnectTime the maximum delay; null to use the default
      * @return the builder
      * @see EventSource#DEFAULT_MAX_RECONNECT_TIME
-     * @see EventSource#setMaxReconnectTime(Duration)
      */
     public Builder maxReconnectTime(Duration maxReconnectTime) {
       this.maxReconnectTime = maxReconnectTime == null ? DEFAULT_MAX_RECONNECT_TIME : maxReconnectTime;

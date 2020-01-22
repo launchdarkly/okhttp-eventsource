@@ -2,6 +2,7 @@ package com.launchdarkly.eventsource;
 
 import org.junit.Test;
 
+import java.time.Duration;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 
@@ -67,7 +68,7 @@ public class EventSourceHttpTest {
       server.start();
       
       try (EventSource es = new EventSource.Builder(handler, server.url("/"))
-          .reconnectTimeMs(10)
+          .reconnectTime(Duration.ofMillis(10))
           .build()) {
         es.start();
         
@@ -100,7 +101,7 @@ public class EventSourceHttpTest {
       server.start();
       
       try (EventSource es = new EventSource.Builder(handler, server.url("/"))
-          .reconnectTimeMs(10)
+          .reconnectTime(Duration.ofMillis(10))
           .build()) {
         es.start();
        
@@ -131,7 +132,7 @@ public class EventSourceHttpTest {
       server.start();
       
       try (EventSource es = new EventSource.Builder(handler, server.url("/"))
-          .reconnectTimeMs(10)
+          .reconnectTime(Duration.ofMillis(10))
           .build()) {
         es.start();
        

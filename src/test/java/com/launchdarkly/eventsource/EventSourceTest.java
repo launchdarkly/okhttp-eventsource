@@ -1,13 +1,5 @@
 package com.launchdarkly.eventsource;
 
-import okhttp3.Headers;
-import okhttp3.HttpUrl;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.OkHttpClient.Builder;
-import okio.Buffer;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Ignore;
@@ -17,12 +9,22 @@ import java.io.IOException;
 import java.net.Proxy;
 import java.net.URI;
 import java.nio.charset.Charset;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.mockito.Mockito.mock;
+
+import okhttp3.Headers;
+import okhttp3.HttpUrl;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.OkHttpClient.Builder;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okio.Buffer;
 
 public class EventSourceTest {
   private static final URI STREAM_URI = URI.create("http://www.example.com/");
@@ -105,16 +107,16 @@ public class EventSourceTest {
   
   @Test
   public void respectsDefaultMaximumBackoffTime() {
-    eventSource.setReconnectionTimeMs(2000);
-    assertEquals(EventSource.DEFAULT_MAX_RECONNECT_TIME_MS, eventSource.getMaxReconnectTimeMs());
-    Assert.assertTrue(eventSource.backoffWithJitter(300) < eventSource.getMaxReconnectTimeMs());
+    eventSource.setReconnectionTime(Duration.ofMillis(2000));
+    assertEquals(EventSource.DEFAULT_MAX_RECONNECT_TIME, eventSource.getMaxReconnectTime());
+    assertEquals(eventSource.backoffWithJitter(300).compareTo(eventSource.getMaxReconnectTime()), -1);
   }
 
   @Test
   public void respectsCustomMaximumBackoffTime() {
-    eventSource.setReconnectionTimeMs(2000);
-    eventSource.setMaxReconnectTimeMs(5000);
-    Assert.assertTrue(eventSource.backoffWithJitter(300) < eventSource.getMaxReconnectTimeMs());
+    eventSource.setReconnectionTime(Duration.ofMillis(2000));
+    eventSource.setMaxReconnectTime(Duration.ofMillis(5000));
+    assertEquals(eventSource.backoffWithJitter(300).compareTo(eventSource.getMaxReconnectTime()), -1);
   }
 
   @Ignore("Useful for inspecting jitter values empirically")
@@ -128,9 +130,9 @@ public class EventSourceTest {
   public void defaultClient() {
     builder.build();
     OkHttpClient client = builder.getClientBuilder().build();
-    assertEquals(EventSource.DEFAULT_CONNECT_TIMEOUT_MS, client.connectTimeoutMillis());
-    assertEquals(EventSource.DEFAULT_READ_TIMEOUT_MS, client.readTimeoutMillis());
-    assertEquals(EventSource.DEFAULT_WRITE_TIMEOUT_MS, client.writeTimeoutMillis());
+    assertEquals(EventSource.DEFAULT_CONNECT_TIMEOUT, Duration.ofMillis(client.connectTimeoutMillis()));
+    assertEquals(EventSource.DEFAULT_READ_TIMEOUT, Duration.ofMillis(client.readTimeoutMillis()));
+    assertEquals(EventSource.DEFAULT_WRITE_TIMEOUT, Duration.ofMillis(client.writeTimeoutMillis()));
     assertNull(client.proxy());
   }
 
@@ -142,9 +144,9 @@ public class EventSourceTest {
     builder.build();
     OkHttpClient client = builder.getClientBuilder().build();
 
-    assertEquals(EventSource.DEFAULT_CONNECT_TIMEOUT_MS, client.connectTimeoutMillis());
-    assertEquals(EventSource.DEFAULT_READ_TIMEOUT_MS, client.readTimeoutMillis());
-    assertEquals(EventSource.DEFAULT_WRITE_TIMEOUT_MS, client.writeTimeoutMillis());
+    assertEquals(EventSource.DEFAULT_CONNECT_TIMEOUT, Duration.ofMillis(client.connectTimeoutMillis()));
+    assertEquals(EventSource.DEFAULT_READ_TIMEOUT, Duration.ofMillis(client.readTimeoutMillis()));
+    assertEquals(EventSource.DEFAULT_WRITE_TIMEOUT, Duration.ofMillis(client.writeTimeoutMillis()));
     Assert.assertNotNull(client.proxy());
     assertEquals(proxyHost + ":" + proxyPort, client.proxy().address().toString());
   }
@@ -156,26 +158,26 @@ public class EventSourceTest {
     builder.build();
     OkHttpClient client = builder.getClientBuilder().build();
 
-    assertEquals(EventSource.DEFAULT_CONNECT_TIMEOUT_MS, client.connectTimeoutMillis());
-    assertEquals(EventSource.DEFAULT_READ_TIMEOUT_MS, client.readTimeoutMillis());
-    assertEquals(EventSource.DEFAULT_WRITE_TIMEOUT_MS, client.writeTimeoutMillis());
+    assertEquals(EventSource.DEFAULT_CONNECT_TIMEOUT, Duration.ofMillis(client.connectTimeoutMillis()));
+    assertEquals(EventSource.DEFAULT_READ_TIMEOUT, Duration.ofMillis(client.readTimeoutMillis()));
+    assertEquals(EventSource.DEFAULT_WRITE_TIMEOUT, Duration.ofMillis(client.writeTimeoutMillis()));
     assertEquals(proxy, client.proxy());
   }
 
   @Test
   public void defaultClientWithCustomTimeouts() {
-    int connectTimeout = 100;
-    int readTimeout = 1000;
-    int writeTimeout = 10000;
-    builder.connectTimeoutMs(connectTimeout);
-    builder.readTimeoutMs(readTimeout);
-    builder.writeTimeoutMs(writeTimeout);
+    Duration connectTimeout = Duration.ofMillis(100);
+    Duration readTimeout = Duration.ofMillis(1000);
+    Duration writeTimeout = Duration.ofMillis(10000);
+    builder.connectTimeout(connectTimeout);
+    builder.readTimeout(readTimeout);
+    builder.writeTimeout(writeTimeout);
     builder.build();
     OkHttpClient client = builder.getClientBuilder().build();
 
-    assertEquals(connectTimeout, client.connectTimeoutMillis());
-    assertEquals(readTimeout, client.readTimeoutMillis());
-    assertEquals(writeTimeout, client.writeTimeoutMillis());
+    assertEquals(connectTimeout, Duration.ofMillis(client.connectTimeoutMillis()));
+    assertEquals(readTimeout, Duration.ofMillis(client.readTimeoutMillis()));
+    assertEquals(writeTimeout, Duration.ofMillis(client.writeTimeoutMillis()));
   }
 
   @Test

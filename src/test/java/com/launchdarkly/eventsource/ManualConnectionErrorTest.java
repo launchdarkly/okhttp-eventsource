@@ -1,11 +1,13 @@
 package com.launchdarkly.eventsource;
 
-import java.net.URI;
-
 import org.junit.Ignore;
 import org.junit.Test;
 
+import java.net.URI;
+import java.time.Duration;
+
 @Ignore
+@SuppressWarnings("javadoc")
 public class ManualConnectionErrorTest {
   EventSource source;
 
@@ -33,7 +35,7 @@ public class ManualConnectionErrorTest {
     // Expected output: multiple connection retries, and "async handler got error" each time.
 
     source = new EventSource.Builder(handler, URI.create("http://launchdarkly.com/bad-url"))
-        .reconnectTimeMs(10)
+        .reconnectTime(Duration.ofMillis(10))
         .build();
     
     source.start();
@@ -58,7 +60,7 @@ public class ManualConnectionErrorTest {
 
     source = new EventSource.Builder(handler, URI.create("http://launchdarkly.com/bad-url"))
         .connectionErrorHandler(connectionErrorHandler)
-        .reconnectTimeMs(10)
+        .reconnectTime(Duration.ofMillis(10))
         .build();
     
     source.start();

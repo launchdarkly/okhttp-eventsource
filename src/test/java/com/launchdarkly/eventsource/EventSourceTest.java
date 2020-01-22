@@ -1,62 +1,72 @@
 package com.launchdarkly.eventsource;
 
-import okhttp3.Headers;
-import okhttp3.HttpUrl;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.OkHttpClient.Builder;
-import okio.Buffer;
 import org.junit.Assert;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.IOException;
 import java.net.Proxy;
 import java.net.URI;
 import java.nio.charset.Charset;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
+import static com.launchdarkly.eventsource.Stubs.createEventsResponse;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.mockito.Mockito.mock;
 
+import okhttp3.Headers;
+import okhttp3.HttpUrl;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.OkHttpClient.Builder;
+import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.RecordedRequest;
+import okhttp3.mockwebserver.SocketPolicy;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okio.Buffer;
+
+@SuppressWarnings("javadoc")
 public class EventSourceTest {
   private static final URI STREAM_URI = URI.create("http://www.example.com/");
   private static final HttpUrl STREAM_HTTP_URL = HttpUrl.parse("http://www.example.com/");
-  private EventSource eventSource;
   private EventSource.Builder builder;
 
   @Before
   public void setUp() {
     EventHandler eventHandler = mock(EventHandler.class);
     builder = new EventSource.Builder(eventHandler, STREAM_URI);
-    eventSource = builder.build();
   }
 
   @Test
   public void hasExpectedUri() {
-    assertEquals(STREAM_URI, eventSource.getUri());
+    try (EventSource eventSource = builder.build()) {
+      assertEquals(STREAM_URI, eventSource.getUri());
+    }
   }
 
   @Test
   public void hasExpectedUriWhenInitializedWithHttpUrl() {
-    EventSource es = new EventSource.Builder(mock(EventHandler.class), STREAM_HTTP_URL).build();
-    assertEquals(STREAM_URI, es.getUri());
+    try (EventSource es = new EventSource.Builder(mock(EventHandler.class), STREAM_HTTP_URL).build()) {
+      assertEquals(STREAM_URI, es.getUri());
+    }
   }
   
   @Test
   public void hasExpectedHttpUrlWhenInitializedWithUri() {
-    assertEquals(STREAM_HTTP_URL, eventSource.getHttpUrl());
+    try (EventSource eventSource = builder.build()) {
+      assertEquals(STREAM_HTTP_URL, eventSource.getHttpUrl());
+    }
   }
   
   @Test
   public void hasExpectedHttpUrlWhenInitializedWithHttpUrl() {
-    EventSource es = new EventSource.Builder(mock(EventHandler.class), STREAM_HTTP_URL).build();
-    assertEquals(STREAM_HTTP_URL, es.getHttpUrl());
+    try (EventSource es = new EventSource.Builder(mock(EventHandler.class), STREAM_HTTP_URL).build()) {
+      assertEquals(STREAM_HTTP_URL, es.getHttpUrl());
+    }
   }
   
   @Test(expected=IllegalArgumentException.class)
@@ -75,62 +85,43 @@ public class EventSourceTest {
   }
 
   @Test
-  public void canSetUri() {
-    URI uri = URI.create("http://www.other.com/");
-    eventSource.setUri(uri);
-    assertEquals(uri, eventSource.getUri());
-  }
-
-  @Test(expected=IllegalArgumentException.class)
-  public void cannotSetUriToNull() {
-    eventSource.setUri(null);
-  }
-
-  @Test(expected=IllegalArgumentException.class)
-  public void cannotSetUriToInvalidScheme() {
-    eventSource.setUri(URI.create("gopher://example.com/"));
-  }
-
-  @Test
-  public void canSetHttpUrl() {
-    HttpUrl url = HttpUrl.parse("http://www.other.com/");
-    eventSource.setHttpUrl(url);
-    assertEquals(url, eventSource.getHttpUrl());
-  }
-  
-  @Test(expected=IllegalArgumentException.class)
-  public void cannotSetHttpUrlToNull() {
-    eventSource.setHttpUrl(null);
-  }
-  
-  @Test
   public void respectsDefaultMaximumBackoffTime() {
-    eventSource.setReconnectionTimeMs(2000);
-    assertEquals(EventSource.DEFAULT_MAX_RECONNECT_TIME_MS, eventSource.getMaxReconnectTimeMs());
-    Assert.assertTrue(eventSource.backoffWithJitter(300) < eventSource.getMaxReconnectTimeMs());
-  }
-
-  @Test
-  public void respectsCustomMaximumBackoffTime() {
-    eventSource.setReconnectionTimeMs(2000);
-    eventSource.setMaxReconnectTimeMs(5000);
-    Assert.assertTrue(eventSource.backoffWithJitter(300) < eventSource.getMaxReconnectTimeMs());
-  }
-
-  @Ignore("Useful for inspecting jitter values empirically")
-  public void inspectJitter() {
-    for (int i = 0; i < 100; i++) {
-      System.out.println("With jitter, retry " + i + ": " + eventSource.backoffWithJitter(i));
+    builder.reconnectTime(Duration.ofMillis(2000));
+    try (EventSource eventSource = builder.build()) {
+      assertEquals(eventSource.backoffWithJitter(300).compareTo(EventSource.DEFAULT_MAX_RECONNECT_TIME), -1);
     }
   }
 
   @Test
+  public void respectsCustomMaximumBackoffTime() {
+    Duration max = Duration.ofMillis(5000);
+    builder.reconnectTime(Duration.ofMillis(2000));
+    builder.maxReconnectTime(max);
+    try (EventSource eventSource = builder.build()) {
+      assertEquals(eventSource.backoffWithJitter(300).compareTo(max), -1);
+    }
+  }
+  
+  @Test
+  public void lastEventIdIsSetToConfiguredValue() throws Exception {
+    String lastId = "123";
+    builder.lastEventId(lastId);
+    try (EventSource es = builder.build()) {
+      assertEquals(lastId, es.getLastEventId());
+    }
+  }
+
+  private OkHttpClient getHttpClientFromBuilder() {
+    try (EventSource es = builder.build()) {} // ensures that the configuration is all copied into the client builder
+    return builder.getClientBuilder().build();
+  }
+  
+  @Test
   public void defaultClient() {
-    builder.build();
-    OkHttpClient client = builder.getClientBuilder().build();
-    assertEquals(EventSource.DEFAULT_CONNECT_TIMEOUT_MS, client.connectTimeoutMillis());
-    assertEquals(EventSource.DEFAULT_READ_TIMEOUT_MS, client.readTimeoutMillis());
-    assertEquals(EventSource.DEFAULT_WRITE_TIMEOUT_MS, client.writeTimeoutMillis());
+    OkHttpClient client = getHttpClientFromBuilder();
+    assertEquals(EventSource.DEFAULT_CONNECT_TIMEOUT, Duration.ofMillis(client.connectTimeoutMillis()));
+    assertEquals(EventSource.DEFAULT_READ_TIMEOUT, Duration.ofMillis(client.readTimeoutMillis()));
+    assertEquals(EventSource.DEFAULT_WRITE_TIMEOUT, Duration.ofMillis(client.writeTimeoutMillis()));
     assertNull(client.proxy());
   }
 
@@ -139,12 +130,11 @@ public class EventSourceTest {
     String proxyHost = "http://proxy.example.com";
     int proxyPort = 8080;
     builder.proxy(proxyHost, proxyPort);
-    builder.build();
-    OkHttpClient client = builder.getClientBuilder().build();
+    OkHttpClient client = getHttpClientFromBuilder();
 
-    assertEquals(EventSource.DEFAULT_CONNECT_TIMEOUT_MS, client.connectTimeoutMillis());
-    assertEquals(EventSource.DEFAULT_READ_TIMEOUT_MS, client.readTimeoutMillis());
-    assertEquals(EventSource.DEFAULT_WRITE_TIMEOUT_MS, client.writeTimeoutMillis());
+    assertEquals(EventSource.DEFAULT_CONNECT_TIMEOUT, Duration.ofMillis(client.connectTimeoutMillis()));
+    assertEquals(EventSource.DEFAULT_READ_TIMEOUT, Duration.ofMillis(client.readTimeoutMillis()));
+    assertEquals(EventSource.DEFAULT_WRITE_TIMEOUT, Duration.ofMillis(client.writeTimeoutMillis()));
     Assert.assertNotNull(client.proxy());
     assertEquals(proxyHost + ":" + proxyPort, client.proxy().address().toString());
   }
@@ -153,29 +143,27 @@ public class EventSourceTest {
   public void defaultClientWithProxy() {
     Proxy proxy = mock(java.net.Proxy.class);
     builder.proxy(proxy);
-    builder.build();
-    OkHttpClient client = builder.getClientBuilder().build();
+    OkHttpClient client = getHttpClientFromBuilder();
 
-    assertEquals(EventSource.DEFAULT_CONNECT_TIMEOUT_MS, client.connectTimeoutMillis());
-    assertEquals(EventSource.DEFAULT_READ_TIMEOUT_MS, client.readTimeoutMillis());
-    assertEquals(EventSource.DEFAULT_WRITE_TIMEOUT_MS, client.writeTimeoutMillis());
+    assertEquals(EventSource.DEFAULT_CONNECT_TIMEOUT, Duration.ofMillis(client.connectTimeoutMillis()));
+    assertEquals(EventSource.DEFAULT_READ_TIMEOUT, Duration.ofMillis(client.readTimeoutMillis()));
+    assertEquals(EventSource.DEFAULT_WRITE_TIMEOUT, Duration.ofMillis(client.writeTimeoutMillis()));
     assertEquals(proxy, client.proxy());
   }
 
   @Test
   public void defaultClientWithCustomTimeouts() {
-    int connectTimeout = 100;
-    int readTimeout = 1000;
-    int writeTimeout = 10000;
-    builder.connectTimeoutMs(connectTimeout);
-    builder.readTimeoutMs(readTimeout);
-    builder.writeTimeoutMs(writeTimeout);
-    builder.build();
-    OkHttpClient client = builder.getClientBuilder().build();
+    Duration connectTimeout = Duration.ofMillis(100);
+    Duration readTimeout = Duration.ofMillis(1000);
+    Duration writeTimeout = Duration.ofMillis(10000);
+    builder.connectTimeout(connectTimeout);
+    builder.readTimeout(readTimeout);
+    builder.writeTimeout(writeTimeout);
+    OkHttpClient client = getHttpClientFromBuilder();
 
-    assertEquals(connectTimeout, client.connectTimeoutMillis());
-    assertEquals(readTimeout, client.readTimeoutMillis());
-    assertEquals(writeTimeout, client.writeTimeoutMillis());
+    assertEquals(connectTimeout, Duration.ofMillis(client.connectTimeoutMillis()));
+    assertEquals(readTimeout, Duration.ofMillis(client.readTimeoutMillis()));
+    assertEquals(writeTimeout, Duration.ofMillis(client.writeTimeoutMillis()));
   }
 
   @Test
@@ -186,7 +174,7 @@ public class EventSourceTest {
         b.writeTimeout(writeTimeout, TimeUnit.MILLISECONDS);
       }
     });
-    OkHttpClient client = builder.getClientBuilder().build();
+    OkHttpClient client = getHttpClientFromBuilder();
 
     assertEquals(writeTimeout, client.writeTimeoutMillis());
   }
@@ -194,28 +182,32 @@ public class EventSourceTest {
   @Test
   public void customMethod() throws IOException {
     builder.method("report");
-    builder.body(RequestBody.create(MediaType.parse("text/plain; charset=utf-8"), "hello world"));
-    Request req = builder.build().buildRequest();
-    assertEquals("REPORT", req.method());
-    assertEquals(MediaType.parse("text/plain; charset=utf-8"), req.body().contentType());
-    Buffer actualBody = new Buffer();
-    req.body().writeTo(actualBody);
-    assertEquals("hello world", actualBody.readString(Charset.forName("utf-8")));
-
-    // ensure we can build multiple requests:
-    req = builder.build().buildRequest();
-    assertEquals("REPORT", req.method());
-    assertEquals(MediaType.parse("text/plain; charset=utf-8"), req.body().contentType());
-    actualBody = new Buffer();
-    req.body().writeTo(actualBody);
-    assertEquals("hello world", actualBody.readString(Charset.forName("utf-8")));
+    builder.body(RequestBody.create("hello world", MediaType.parse("text/plain; charset=utf-8")));
+    try (EventSource es = builder.build()) {
+      Request req = es.buildRequest();
+      assertEquals("REPORT", req.method());
+      assertEquals(MediaType.parse("text/plain; charset=utf-8"), req.body().contentType());
+      Buffer actualBody = new Buffer();
+      req.body().writeTo(actualBody);
+      assertEquals("hello world", actualBody.readString(Charset.forName("utf-8")));
+  
+      // ensure we can build multiple requests:
+      req = es.buildRequest();
+      assertEquals("REPORT", req.method());
+      assertEquals(MediaType.parse("text/plain; charset=utf-8"), req.body().contentType());
+      actualBody = new Buffer();
+      req.body().writeTo(actualBody);
+      assertEquals("hello world", actualBody.readString(Charset.forName("utf-8")));
+    }
   }
 
   @Test
   public void defaultMethod() {
-    Request req = builder.build().buildRequest();
-    assertEquals("GET", req.method());
-    assertEquals(null, req.body());
+    try (EventSource es = builder.build()) {
+      Request req = es.buildRequest();
+      assertEquals("GET", req.method());
+      assertEquals(null, req.body());
+    }
   }
   
   @Test
@@ -225,11 +217,13 @@ public class EventSourceTest {
         .add("header2", "value1")
         .build();
     builder.headers(headers);
-    Request req = builder.build().buildRequest();
-    assertEquals(Arrays.<String>asList("value1", "value2"), req.headers().values("header1"));
-    assertEquals(Arrays.<String>asList("value1"), req.headers().values("header2"));
-    assertEquals(Arrays.<String>asList("text/event-stream"), req.headers().values("Accept"));
-    assertEquals(Arrays.<String>asList("no-cache"), req.headers().values("Cache-Control"));
+    try (EventSource es = builder.build()) {
+      Request req = es.buildRequest();
+      assertEquals(Arrays.asList("value1", "value2"), req.headers().values("header1"));
+      assertEquals(Arrays.asList("value1"), req.headers().values("header2"));
+      assertEquals(Arrays.asList("text/event-stream"), req.headers().values("Accept"));
+      assertEquals(Arrays.asList("no-cache"), req.headers().values("Cache-Control"));
+    }
   }
   
   @Test
@@ -239,8 +233,75 @@ public class EventSourceTest {
         .add("header2", "value1")
         .build();
     builder.headers(headers);
-    Request req = builder.build().buildRequest();
-    assertEquals(Arrays.<String>asList("text/plain"), req.headers().values("Accept"));
-    assertEquals(Arrays.<String>asList("value1"), req.headers().values("header2"));
+    try (EventSource es = builder.build()) {
+      Request req = es.buildRequest();
+      assertEquals(Arrays.asList("text/plain"), req.headers().values("Accept"));
+      assertEquals(Arrays.asList("value1"), req.headers().values("header2"));
+    }
+  }
+  
+  @Test
+  public void configuredLastEventIdIsIncludedInHeaders() throws Exception {
+    String lastId = "123";
+    builder.lastEventId(lastId);
+    try (EventSource es = builder.build()) {
+      Request req = es.buildRequest();
+      assertEquals(Arrays.asList(lastId), req.headers().values("Last-Event-Id"));
+    }
+  }
+  
+  @Test
+  public void lastEventIdIsUpdatedFromEvent() throws Exception {
+    String initialLastId = "123";
+    String newLastId = "099";
+    String eventType = "thing";
+    String eventData = "some-data";
+    
+    try (MockWebServer server = new MockWebServer()) {
+      String body = "id: " + newLastId + "\nevent: " + eventType + "\ndata: " + eventData + "\n\n";
+      server.enqueue(createEventsResponse(body, SocketPolicy.KEEP_OPEN));
+      server.start();
+      
+      Stubs.TestHandler eventHandler = new Stubs.TestHandler();
+      EventSource.Builder builder = new EventSource.Builder(eventHandler, server.url("/"))
+          .lastEventId(initialLastId);
+      try (EventSource es = builder.build()) {
+        es.start();
+        assertEquals(Stubs.LogItem.opened(), eventHandler.log.take());
+        
+        Stubs.LogItem receivedEvent = eventHandler.log.take(); // waits till we've processed a request
+        assertEquals(Stubs.LogItem.event(eventType, eventData, newLastId), receivedEvent);
+        
+        assertEquals(newLastId, es.getLastEventId());
+      }
+    }
+  }
+  
+  @Test
+  public void newLastEventIdIsSentOnNextConnectAttempt() throws Exception {
+    String initialLastId = "123";
+    String newLastId = "099";
+    String eventType = "thing";
+    String eventData = "some-data";
+    
+    try (MockWebServer server = new MockWebServer()) {
+      String body = "id: " + newLastId + "\nevent: " + eventType + "\ndata: " + eventData + "\n\n";
+      server.enqueue(createEventsResponse(body, SocketPolicy.KEEP_OPEN));
+      server.enqueue(createEventsResponse(body, SocketPolicy.KEEP_OPEN)); // expect a 2nd connection
+      server.start();
+      
+      Stubs.TestHandler eventHandler = new Stubs.TestHandler();
+      EventSource.Builder builder = new EventSource.Builder(eventHandler, server.url("/"))
+          .reconnectTime(Duration.ofMillis(100))
+          .lastEventId(initialLastId);
+      try (EventSource es = builder.build()) {
+        es.start();
+        
+        RecordedRequest req0 = server.takeRequest();
+        RecordedRequest req1 = server.takeRequest();
+        assertEquals(initialLastId, req0.getHeader("Last-Event-Id"));
+        assertEquals(newLastId, req1.getHeader("Last-Event-Id"));
+      }
+    }
   }
 }

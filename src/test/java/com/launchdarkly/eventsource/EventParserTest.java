@@ -4,8 +4,8 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-
 import java.net.URI;
+import java.time.Duration;
 
 import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.mock;
@@ -16,12 +16,13 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 /**
  * Adapted from https://github.com/aslakhellesoy/eventsource-java/blob/master/src/test/java/com/github/eventsource/client/EventStreamParserTest.java
  */
+@SuppressWarnings("javadoc")
 public class EventParserTest {
 
   private static final URI ORIGIN = URI.create("http://host.com:99/foo");
-  public EventHandler eventHandler;
-  public ConnectionHandler connectionHandler;
-  public EventParser parser;
+  private EventHandler eventHandler;
+  private ConnectionHandler connectionHandler;
+  private EventParser parser;
 
   @Before
   public void setUp() throws Exception {
@@ -96,7 +97,7 @@ public class EventParserTest {
     parser.line("retry: 7000");
     parser.line("");
 
-    verify(connectionHandler).setReconnectionTimeMs(7000);
+    verify(connectionHandler).setReconnectionTime(Duration.ofMillis(7000));
   }
 
   @Test

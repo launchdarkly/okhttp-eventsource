@@ -5,10 +5,10 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.net.URI;
 
 @Ignore
+@SuppressWarnings("javadoc")
 public class ManualTest {
   private static final Logger logger = LoggerFactory.getLogger(ManualTest.class);
 

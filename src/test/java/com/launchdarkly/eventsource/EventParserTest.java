@@ -16,12 +16,13 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 /**
  * Adapted from https://github.com/aslakhellesoy/eventsource-java/blob/master/src/test/java/com/github/eventsource/client/EventStreamParserTest.java
  */
+@SuppressWarnings("javadoc")
 public class EventParserTest {
 
   private static final URI ORIGIN = URI.create("http://host.com:99/foo");
-  public EventHandler eventHandler;
-  public ConnectionHandler connectionHandler;
-  public EventParser parser;
+  private EventHandler eventHandler;
+  private ConnectionHandler connectionHandler;
+  private EventParser parser;
 
   @Before
   public void setUp() throws Exception {

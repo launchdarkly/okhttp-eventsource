@@ -2,6 +2,17 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [2.0.0] - 2020-01-22
+### Added:
+- `EventSource.Builder.lastEventId` (replaces `EventSource.setLastEventId`).
+
+### Changed:
+- This library now uses OkHttp 4.x and requires Java 8 or above.
+- Configuration methods that previously specified a duration in milliseconds now use the `Duration` class.
+
+### Removed:
+- In `EventSource`: `setHttpUrl`, `setLastEventId`, `setMaxReconnectTime`, `setReconnectionTime`, `setUri` (these can only be set in the builder).
+
 ## [1.10.1] - 2019-10-17
 ### Fixed:
 - Fixed trailing period in logger name. ([#34](https://github.com/launchdarkly/okhttp-eventsource/issues/34))

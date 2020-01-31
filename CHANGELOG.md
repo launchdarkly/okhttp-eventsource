@@ -2,6 +2,10 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [2.0.1] - 2020-01-31
+### Fixed:
+- A build problem caused the 2.0.0 release to have an incorrect `pom.xml` that did not list any dependencies.
+
 ## [2.0.0] - 2020-01-22
 ### Added:
 - `EventSource.Builder.lastEventId` (replaces `EventSource.setLastEventId`).

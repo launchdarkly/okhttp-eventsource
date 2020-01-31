@@ -16,3 +16,6 @@ publications:
 
 template:
   name: gradle
+
+documentation:
+  githubPages: true

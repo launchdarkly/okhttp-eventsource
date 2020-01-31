@@ -16,6 +16,8 @@ publications:
 
 template:
   name: gradle
+  skip:
+    - test # for unknown reasons, the unit tests hang in the Releaser environment even though they work in CI
 
 documentation:
   githubPages: true

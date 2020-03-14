@@ -2,24 +2,11 @@ package com.launchdarkly.eventsource;
 
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.TimeUnit;
 
-import okhttp3.mockwebserver.MockResponse;
-import okhttp3.mockwebserver.SocketPolicy;
+import static org.junit.Assert.assertNull;
 
 class Stubs {
-  private static final int CHUNK_SIZE = 5;
-  
-  static MockResponse createEventsResponse(String body, SocketPolicy socketPolicy) {
-    return new MockResponse()
-        .setHeader("Content-Type", "text/event-stream")
-        .setChunkedBody(body, CHUNK_SIZE)
-        .setSocketPolicy(socketPolicy);
-  }
-  
-  static MockResponse createErrorResponse(int status) {
-    return new MockResponse().setResponseCode(500);
-  }
-  
   static class LogItem {
     private final String action;
     private final String[] params;
@@ -103,6 +90,12 @@ class Stubs {
     @Override
     public void onClosed() throws Exception {
       log.add(LogItem.closed());
+    }
+
+    void assertNoMoreLogItems() {
+      try {
+        assertNull(log.poll(100, TimeUnit.MILLISECONDS));
+      } catch (InterruptedException e) {}
     }
   }
 }

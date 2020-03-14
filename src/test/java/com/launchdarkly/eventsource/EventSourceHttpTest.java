@@ -5,20 +5,121 @@ import com.launchdarkly.eventsource.Stubs.TestHandler;
 
 import org.junit.Test;
 
+import java.io.IOException;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
-import static com.launchdarkly.eventsource.Stubs.createErrorResponse;
-import static com.launchdarkly.eventsource.Stubs.createEventsResponse;
+import static com.launchdarkly.eventsource.StubServer.Handlers.forRequestsInSequence;
+import static com.launchdarkly.eventsource.StubServer.Handlers.hang;
+import static com.launchdarkly.eventsource.StubServer.Handlers.interruptible;
+import static com.launchdarkly.eventsource.StubServer.Handlers.returnStatus;
+import static com.launchdarkly.eventsource.StubServer.Handlers.stream;
+import static com.launchdarkly.eventsource.StubServer.Handlers.streamProducerFromChunkedString;
+import static com.launchdarkly.eventsource.StubServer.Handlers.streamProducerFromString;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
-import okhttp3.mockwebserver.MockWebServer;
-import okhttp3.mockwebserver.SocketPolicy;
+import okhttp3.Headers;
+import okhttp3.MediaType;
+import okhttp3.RequestBody;
 
 @SuppressWarnings("javadoc")
 public class EventSourceHttpTest {
+  private static final String CONTENT_TYPE = "text/event-stream";
+  
+  @Test
+  public void eventSourceSetsRequestProperties() throws Exception {
+    String requestPath = "/some/path";
+    Headers headers = new Headers.Builder().add("header1", "value1").add("header2", "value2").build();
+    
+    try (StubServer server = StubServer.start(hang())) {
+      try (EventSource es = new EventSource.Builder(new TestHandler(), server.getUri().resolve(requestPath))
+          .headers(headers)
+          .build()) {
+        es.start();
+        
+        StubServer.RequestInfo r = server.awaitRequest();
+        assertEquals("GET", r.getMethod());
+        assertEquals(requestPath, r.getPath());
+        assertEquals("value1", r.getHeader("header1"));
+        assertEquals("value2", r.getHeader("header2"));
+        assertEquals("text/event-stream", r.getHeader("Accept"));
+        assertEquals("no-cache", r.getHeader("Cache-Control"));
+      }
+    }
+  }
+
+  @Test
+  public void customMethodWithBody() throws IOException {
+    String content = "hello world";
+    
+    try (StubServer server = StubServer.start(hang())) {
+      try (EventSource es = new EventSource.Builder(new TestHandler(), server.getUri())
+          .method("report")
+          .body(RequestBody.create("hello world", MediaType.parse("text/plain; charset=utf-8")))
+          .build()) {
+        es.start();
+        
+        StubServer.RequestInfo r = server.awaitRequest();
+        assertEquals("REPORT", r.getMethod());
+        assertEquals(content, r.getBody());
+      }
+    }
+  }
+
+  @Test
+  public void configuredLastEventIdIsIncludedInHeaders() throws Exception {
+    String lastId = "123";
+    
+    try (StubServer server = StubServer.start(hang())) {
+      try (EventSource es = new EventSource.Builder(new TestHandler(), server.getUri())
+          .lastEventId(lastId)
+          .build()) {
+        es.start();
+        
+        StubServer.RequestInfo r = server.awaitRequest();
+        assertEquals(lastId, r.getHeader("Last-Event-Id"));
+      }
+    }
+  }
+  
+  @Test
+  public void lastEventIdIsUpdatedFromEvent() throws Exception {
+    String newLastId = "099";
+    String eventType = "thing";
+    String eventData = "some-data";
+    
+    final String body = "event: " + eventType + "\nid: " + newLastId + "\ndata: " + eventData + "\n\n";
+    
+    TestHandler eventSink = new TestHandler();
+    StubServer.InterruptibleHandler streamHandler = interruptible(stream(CONTENT_TYPE, streamProducerFromString(body, true)));
+
+    try (StubServer server = StubServer.start(streamHandler)) {
+      try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
+          .reconnectTime(Duration.ofMillis(10))
+          .build()) {
+        es.start();
+        
+        assertEquals(Stubs.LogItem.opened(), eventSink.log.take());
+        assertEquals(Stubs.LogItem.event(eventType, eventData, newLastId), eventSink.log.take());
+
+        StubServer.RequestInfo r0 = server.awaitRequest();
+        assertNull(r0.getHeader("Last-Event-Id"));
+        
+        streamHandler.interrupt(); // force stream to reconnect
+       
+        StubServer.RequestInfo r1 = server.awaitRequest();
+        assertEquals(newLastId, r1.getHeader("Last-Event-Id"));
+      }
+    }
+  }
+  
   @Test
   public void eventSourceReadsChunkedResponse() throws Exception {
-    String body = "data: data-by-itself\n\n" +
+    final String body = "data: data-by-itself\n\n" +
             "event: event-with-data\n" +
             "data: abc\n\n" +
             ": this is a comment\n" +
@@ -26,34 +127,33 @@ public class EventSourceHttpTest {
             "id: my-id\n" +
             "data: abc\n" +
             "data: def\n\n";
-
-    TestHandler handler = new TestHandler();
-
-    try (MockWebServer server = new MockWebServer()) {
-      server.enqueue(createEventsResponse(body, SocketPolicy.KEEP_OPEN));
-      server.start();
-      
-      try (EventSource es = new EventSource.Builder(handler, server.url("/"))
-          .build()) {
+    
+    TestHandler eventSink = new TestHandler();
+    StubServer.Handler streamHandler = stream(CONTENT_TYPE,
+        streamProducerFromChunkedString(body, 5, Duration.ZERO, true));
+    
+    try (StubServer server = StubServer.start(streamHandler)) {
+      try (EventSource es = new EventSource.Builder(eventSink, server.getUri()).build()) {
         es.start();
         
-        assertEquals(LogItem.opened(), handler.log.take());
+        assertEquals(LogItem.opened(), eventSink.log.take());
         
         assertEquals(LogItem.event("message", "data-by-itself"), // "message" is the default event name, per SSE spec
-            handler.log.take());
+            eventSink.log.take());
 
         assertEquals(LogItem.event("event-with-data", "abc"),
-            handler.log.take());
+            eventSink.log.take());
  
         assertEquals(LogItem.comment("this is a comment"),
-            handler.log.take());
+            eventSink.log.take());
   
         assertEquals(LogItem.event("event-with-more-data-and-id",  "abc\ndef", "my-id"),
-            handler.log.take());
+            eventSink.log.take());
+        
+        eventSink.assertNoMoreLogItems();
       }
-      
-      assertEquals(LogItem.closed(), handler.log.take());
     }
+    assertEquals(LogItem.closed(), eventSink.log.take());
   }
   
   @Test
@@ -61,32 +161,37 @@ public class EventSourceHttpTest {
     String body1 = "data: first\n\n";
     String body2 = "data: second\n\n";
 
-    TestHandler handler = new TestHandler();
-
-    try (MockWebServer server = new MockWebServer()) {
-      server.enqueue(createEventsResponse(body1, SocketPolicy.DISCONNECT_AT_END));
-      server.enqueue(createEventsResponse(body2, SocketPolicy.KEEP_OPEN));
-      server.start();
-      
-      try (EventSource es = new EventSource.Builder(handler, server.url("/"))
+    TestHandler eventSink = new TestHandler();
+    
+    StubServer.InterruptibleHandler streamHandler1 = interruptible(stream(CONTENT_TYPE, streamProducerFromString(body1, true)));
+    StubServer.Handler streamHandler2 = stream(CONTENT_TYPE, streamProducerFromString(body2, true));
+    StubServer.Handler allRequests = forRequestsInSequence(streamHandler1, streamHandler2);
+        
+    try (StubServer server = StubServer.start(allRequests)) {      
+      try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
           .reconnectTime(Duration.ofMillis(10))
           .build()) {
         es.start();
         
-        assertEquals(LogItem.opened(), handler.log.take());
+        assertEquals(LogItem.opened(), eventSink.log.take());
         
         assertEquals(LogItem.event("message", "first"),
-            handler.log.take());
+            eventSink.log.take());
 
-        assertEquals(LogItem.closed(), handler.log.take());
+        eventSink.assertNoMoreLogItems(); // should not have closed first stream yet
+        
+        streamHandler1.interrupt();
+
+        assertEquals(LogItem.closed(), eventSink.log.take());
        
-        assertEquals(LogItem.opened(), handler.log.take());
+        assertEquals(LogItem.opened(), eventSink.log.take());
 
         assertEquals(LogItem.event("message", "second"),
-            handler.log.take());
+            eventSink.log.take());
       }
       
-      assertEquals(LogItem.closed(), handler.log.take());
+      assertEquals(LogItem.closed(), eventSink.log.take());
+      eventSink.assertNoMoreLogItems();
     }
   }
 
@@ -94,28 +199,29 @@ public class EventSourceHttpTest {
   public void eventSourceReconnectsAfterErrorOnFirstRequest() throws Exception {
     String body = "data: good\n\n";
 
-    TestHandler handler = new TestHandler();
+    TestHandler eventSink = new TestHandler();
 
-    try (MockWebServer server = new MockWebServer()) {
-      server.enqueue(createErrorResponse(500));
-      server.enqueue(createEventsResponse(body, SocketPolicy.KEEP_OPEN));
-      server.start();
-      
-      try (EventSource es = new EventSource.Builder(handler, server.url("/"))
+    StubServer.Handler streamHandler = stream(CONTENT_TYPE, streamProducerFromString(body, true));
+    StubServer.Handler allRequests = forRequestsInSequence(returnStatus(500), streamHandler);
+    
+    try (StubServer server = StubServer.start(allRequests)) {            
+      try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
           .reconnectTime(Duration.ofMillis(10))
           .build()) {
         es.start();
        
         assertEquals(LogItem.error(new UnsuccessfulResponseException(500)),
-            handler.log.take());
+            eventSink.log.take());
         
-        assertEquals(LogItem.opened(), handler.log.take());
+        assertEquals(LogItem.opened(), eventSink.log.take());
         
         assertEquals(LogItem.event("message", "good"),
-            handler.log.take());
+            eventSink.log.take());
+        
+        eventSink.assertNoMoreLogItems();
       }
       
-      assertEquals(LogItem.closed(), handler.log.take());
+      assertEquals(LogItem.closed(), eventSink.log.take());
     }
   }
 
@@ -124,36 +230,117 @@ public class EventSourceHttpTest {
     String body1 = "data: first\n\n";
     String body2 = "data: second\n\n";
 
-    TestHandler handler = new TestHandler();
+    TestHandler eventSink = new TestHandler();
 
-    try (MockWebServer server = new MockWebServer()) {
-      server.enqueue(createEventsResponse(body1, SocketPolicy.DISCONNECT_AT_END));
-      server.enqueue(createErrorResponse(500));
-      server.enqueue(createEventsResponse(body2, SocketPolicy.KEEP_OPEN));
-      server.start();
-      
-      try (EventSource es = new EventSource.Builder(handler, server.url("/"))
+    StubServer.InterruptibleHandler streamHandler1 = interruptible(stream(CONTENT_TYPE, streamProducerFromString(body1, true)));
+    StubServer.Handler streamHandler2 = stream(CONTENT_TYPE, streamProducerFromString(body2, true));
+    StubServer.Handler allRequests = forRequestsInSequence(streamHandler1, returnStatus(500), streamHandler2);
+    
+    try (StubServer server = StubServer.start(allRequests)) {            
+      try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
           .reconnectTime(Duration.ofMillis(10))
           .build()) {
         es.start();
        
-        assertEquals(LogItem.opened(), handler.log.take());
+        assertEquals(LogItem.opened(), eventSink.log.take());
         
         assertEquals(LogItem.event("message", "first"),
-            handler.log.take());
+            eventSink.log.take());
         
-        assertEquals(LogItem.closed(), handler.log.take());
+        eventSink.assertNoMoreLogItems();
+        
+        streamHandler1.interrupt(); // make first stream fail
+        
+        assertEquals(LogItem.closed(), eventSink.log.take());
         
         assertEquals(LogItem.error(new UnsuccessfulResponseException(500)),
-            handler.log.take());
+            eventSink.log.take());
         
-        assertEquals(LogItem.opened(), handler.log.take());
+        assertEquals(LogItem.opened(), eventSink.log.take());
         
         assertEquals(LogItem.event("message", "second"),
-            handler.log.take());
+            eventSink.log.take());
+        
+        eventSink.assertNoMoreLogItems();
       }
       
-      assertEquals(LogItem.closed(), handler.log.take());
+      assertEquals(LogItem.closed(), eventSink.log.take());
+    }
+  }
+
+  @Test
+  public void streamDoesNotReconnectIfConnectionErrorHandlerSaysToStop() throws Exception {
+    final AtomicBoolean calledHandler = new AtomicBoolean(false);
+    final AtomicReference<Throwable> receivedError = new AtomicReference<Throwable>();
+    
+    ConnectionErrorHandler connectionErrorHandler = new ConnectionErrorHandler() {
+      public Action onConnectionError(Throwable t) {
+        calledHandler.set(true);
+        receivedError.set(t);
+        return Action.SHUTDOWN;
+      }
+    };
+    
+    TestHandler eventSink = new TestHandler();
+
+    try (StubServer server = StubServer.start(returnStatus(500))) {            
+      try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
+          .connectionErrorHandler(connectionErrorHandler)
+          .reconnectTime(Duration.ofMillis(10))
+          .build()) {
+        es.start();
+       
+        // If a ConnectionErrorHandler returns SHUTDOWN, EventSource does not call onClosed() or onError()
+        // on the regular event handler, since it assumes that the caller already knows what happened.
+        // Therefore we don't expect to see any items in eventSink.
+        eventSink.assertNoMoreLogItems();
+
+        assertEquals(ReadyState.SHUTDOWN, es.getState());
+      }
+    }
+    
+    assertTrue(calledHandler.get());
+    assertNotNull(receivedError.get());
+    assertEquals(UnsuccessfulResponseException.class, receivedError.get().getClass());
+  }
+  
+  @Test
+  public void canForceEventSourceToRestart() throws Exception {
+    String body1 = "data: first\n\n";
+    String body2 = "data: second\n\n";
+
+    TestHandler eventSink = new TestHandler();
+
+    StubServer.Handler streamHandler1 = stream(CONTENT_TYPE, streamProducerFromString(body1, true));
+    StubServer.Handler streamHandler2 = stream(CONTENT_TYPE, streamProducerFromString(body2, true));
+    StubServer.Handler allRequests = forRequestsInSequence(streamHandler1, streamHandler2);
+    
+    try (StubServer server = StubServer.start(allRequests)) {            
+      try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
+          .reconnectTime(Duration.ofMillis(10))
+          .build()) {
+        es.start();
+       
+        assertEquals(LogItem.opened(), eventSink.log.take());
+        
+        assertEquals(LogItem.event("message", "first"),
+            eventSink.log.take());
+        
+        eventSink.assertNoMoreLogItems();
+        
+        es.restart();
+         
+        assertEquals(LogItem.closed(), eventSink.log.take()); // there shouldn't be any error notification, just "closed"
+        
+        assertEquals(LogItem.opened(), eventSink.log.take());
+        
+        assertEquals(LogItem.event("message", "second"),
+            eventSink.log.take());
+        
+        eventSink.assertNoMoreLogItems();
+      }
+      
+      assertEquals(LogItem.closed(), eventSink.log.take());
     }
   }
 }

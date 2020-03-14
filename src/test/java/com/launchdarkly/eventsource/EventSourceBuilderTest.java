@@ -4,33 +4,21 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.io.IOException;
 import java.net.Proxy;
 import java.net.URI;
-import java.nio.charset.Charset;
 import java.time.Duration;
-import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
-import static com.launchdarkly.eventsource.Stubs.createEventsResponse;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.mockito.Mockito.mock;
 
-import okhttp3.Headers;
 import okhttp3.HttpUrl;
-import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.OkHttpClient.Builder;
-import okhttp3.mockwebserver.MockWebServer;
-import okhttp3.mockwebserver.RecordedRequest;
-import okhttp3.mockwebserver.SocketPolicy;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okio.Buffer;
 
 @SuppressWarnings("javadoc")
-public class EventSourceTest {
+public class EventSourceBuilderTest {
   private static final URI STREAM_URI = URI.create("http://www.example.com/");
   private static final HttpUrl STREAM_HTTP_URL = HttpUrl.parse("http://www.example.com/");
   private EventSource.Builder builder;
@@ -177,131 +165,5 @@ public class EventSourceTest {
     OkHttpClient client = getHttpClientFromBuilder();
 
     assertEquals(writeTimeout, client.writeTimeoutMillis());
-  }
-  
-  @Test
-  public void customMethod() throws IOException {
-    builder.method("report");
-    builder.body(RequestBody.create("hello world", MediaType.parse("text/plain; charset=utf-8")));
-    try (EventSource es = builder.build()) {
-      Request req = es.buildRequest();
-      assertEquals("REPORT", req.method());
-      assertEquals(MediaType.parse("text/plain; charset=utf-8"), req.body().contentType());
-      Buffer actualBody = new Buffer();
-      req.body().writeTo(actualBody);
-      assertEquals("hello world", actualBody.readString(Charset.forName("utf-8")));
-  
-      // ensure we can build multiple requests:
-      req = es.buildRequest();
-      assertEquals("REPORT", req.method());
-      assertEquals(MediaType.parse("text/plain; charset=utf-8"), req.body().contentType());
-      actualBody = new Buffer();
-      req.body().writeTo(actualBody);
-      assertEquals("hello world", actualBody.readString(Charset.forName("utf-8")));
-    }
-  }
-
-  @Test
-  public void defaultMethod() {
-    try (EventSource es = builder.build()) {
-      Request req = es.buildRequest();
-      assertEquals("GET", req.method());
-      assertEquals(null, req.body());
-    }
-  }
-  
-  @Test
-  public void customHeaders() throws IOException {
-    Headers headers = new Headers.Builder()
-        .add("header1", "value1").add("header1", "value2")
-        .add("header2", "value1")
-        .build();
-    builder.headers(headers);
-    try (EventSource es = builder.build()) {
-      Request req = es.buildRequest();
-      assertEquals(Arrays.asList("value1", "value2"), req.headers().values("header1"));
-      assertEquals(Arrays.asList("value1"), req.headers().values("header2"));
-      assertEquals(Arrays.asList("text/event-stream"), req.headers().values("Accept"));
-      assertEquals(Arrays.asList("no-cache"), req.headers().values("Cache-Control"));
-    }
-  }
-  
-  @Test
-  public void customHeadersOverwritingDefaults() throws IOException {
-    Headers headers = new Headers.Builder()
-        .add("Accept", "text/plain")
-        .add("header2", "value1")
-        .build();
-    builder.headers(headers);
-    try (EventSource es = builder.build()) {
-      Request req = es.buildRequest();
-      assertEquals(Arrays.asList("text/plain"), req.headers().values("Accept"));
-      assertEquals(Arrays.asList("value1"), req.headers().values("header2"));
-    }
-  }
-  
-  @Test
-  public void configuredLastEventIdIsIncludedInHeaders() throws Exception {
-    String lastId = "123";
-    builder.lastEventId(lastId);
-    try (EventSource es = builder.build()) {
-      Request req = es.buildRequest();
-      assertEquals(Arrays.asList(lastId), req.headers().values("Last-Event-Id"));
-    }
-  }
-  
-  @Test
-  public void lastEventIdIsUpdatedFromEvent() throws Exception {
-    String initialLastId = "123";
-    String newLastId = "099";
-    String eventType = "thing";
-    String eventData = "some-data";
-    
-    try (MockWebServer server = new MockWebServer()) {
-      String body = "id: " + newLastId + "\nevent: " + eventType + "\ndata: " + eventData + "\n\n";
-      server.enqueue(createEventsResponse(body, SocketPolicy.KEEP_OPEN));
-      server.start();
-      
-      Stubs.TestHandler eventHandler = new Stubs.TestHandler();
-      EventSource.Builder builder = new EventSource.Builder(eventHandler, server.url("/"))
-          .lastEventId(initialLastId);
-      try (EventSource es = builder.build()) {
-        es.start();
-        assertEquals(Stubs.LogItem.opened(), eventHandler.log.take());
-        
-        Stubs.LogItem receivedEvent = eventHandler.log.take(); // waits till we've processed a request
-        assertEquals(Stubs.LogItem.event(eventType, eventData, newLastId), receivedEvent);
-        
-        assertEquals(newLastId, es.getLastEventId());
-      }
-    }
-  }
-  
-  @Test
-  public void newLastEventIdIsSentOnNextConnectAttempt() throws Exception {
-    String initialLastId = "123";
-    String newLastId = "099";
-    String eventType = "thing";
-    String eventData = "some-data";
-    
-    try (MockWebServer server = new MockWebServer()) {
-      String body = "id: " + newLastId + "\nevent: " + eventType + "\ndata: " + eventData + "\n\n";
-      server.enqueue(createEventsResponse(body, SocketPolicy.KEEP_OPEN));
-      server.enqueue(createEventsResponse(body, SocketPolicy.KEEP_OPEN)); // expect a 2nd connection
-      server.start();
-      
-      Stubs.TestHandler eventHandler = new Stubs.TestHandler();
-      EventSource.Builder builder = new EventSource.Builder(eventHandler, server.url("/"))
-          .reconnectTime(Duration.ofMillis(100))
-          .lastEventId(initialLastId);
-      try (EventSource es = builder.build()) {
-        es.start();
-        
-        RecordedRequest req0 = server.takeRequest();
-        RecordedRequest req1 = server.takeRequest();
-        assertEquals(initialLastId, req0.getHeader("Last-Event-Id"));
-        assertEquals(newLastId, req1.getHeader("Last-Event-Id"));
-      }
-    }
   }
 }

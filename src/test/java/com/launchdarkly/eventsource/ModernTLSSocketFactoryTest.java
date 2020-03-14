@@ -3,11 +3,14 @@ package com.launchdarkly.eventsource;
 import org.junit.Test;
 
 import javax.net.ssl.SSLSocket;
-import java.net.Socket;
 
 import static org.mockito.Matchers.eq;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+@SuppressWarnings("javadoc")
 public class ModernTLSSocketFactoryTest {
 
   @Test

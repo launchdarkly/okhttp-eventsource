@@ -31,9 +31,14 @@ allprojects {
     targetCompatibility = 1.8
 }
 
+ext.versions = [
+	"okhttp": "4.4.1",
+	"slf4j": "1.7.22"
+]
+
 dependencies {
-    compile "com.squareup.okhttp3:okhttp:4.3.1"
-    compile "org.slf4j:slf4j-api:1.7.22"
+    compile "com.squareup.okhttp3:okhttp:${versions.okhttp}"
+    compile "org.slf4j:slf4j-api:${versions.slf4j}"
     testRuntime "ch.qos.logback:logback-classic:1.1.9"
     testCompile "org.mockito:mockito-core:1.10.19"
     testCompile "com.squareup.okhttp3:mockwebserver:4.3.1"

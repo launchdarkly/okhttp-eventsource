@@ -13,9 +13,7 @@ import java.net.URI;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 import java.util.Arrays;
-import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -24,6 +22,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.UnaryOperator;
 
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
@@ -159,7 +158,31 @@ public class EventSource implements ConnectionHandler, Closeable {
       }
     });
   }
-
+  
+  /**
+   * Drops the current stream connection (if any) and attempts to reconnect.
+   * <p>
+   * This method returns immediately after dropping the current connection; the reconnection happens on
+   * a worker thread.
+   * <p>
+   * If a connection attempt is already in progress but has not yet connected, or if {@link #close()} has
+   * previously been called, this method has no effect. If {@link #start()} has never been called, it is
+   * the same as calling {@link #start()}.
+   */
+  public void restart() {
+    ReadyState previousState = readyState.getAndUpdate(new UnaryOperator<ReadyState>() {
+      public ReadyState apply(ReadyState t) {
+        return t == ReadyState.OPEN ? ReadyState.CLOSED : t;
+      }
+    });
+    if (previousState == OPEN) {
+      closeCurrentStream(previousState);
+    } else if (previousState == RAW || previousState == CONNECTING) {
+      start();
+    }
+    // if already shutdown or in the process of closing, do nothing
+  }
+  
   /**
    * Returns an enum indicating the current status of the connection.
    * @return a {@link ReadyState} value
@@ -168,6 +191,9 @@ public class EventSource implements ConnectionHandler, Closeable {
     return readyState.get();
   }
 
+  /**
+   * Drops the current stream connection (if any) and permanently shuts down the EventSource.
+   */
   @Override
   public void close() {
     ReadyState currentState = readyState.getAndSet(SHUTDOWN);
@@ -175,21 +201,8 @@ public class EventSource implements ConnectionHandler, Closeable {
     if (currentState == SHUTDOWN) {
       return;
     }
-    if (currentState == ReadyState.OPEN) {
-      try {
-        handler.onClosed();
-      } catch (Exception e) {
-        handler.onError(e);
-      }
-    }
-
-    if (call != null) {
-      // The call.cancel() must precede the bufferedSource.close().
-      // Otherwise, an IllegalArgumentException "Unbalanced enter/exit" error is thrown by okhttp.
-      // https://github.com/google/ExoPlayer/issues/1348
-      call.cancel();
-      logger.debug("call cancelled");
-    }
+    
+    closeCurrentStream(currentState);
 
     eventExecutor.shutdownNow();
     streamExecutor.shutdownNow();
@@ -204,6 +217,24 @@ public class EventSource implements ConnectionHandler, Closeable {
           client.dispatcher().executorService().shutdownNow();
         }
       }
+    }
+  }
+  
+  private void closeCurrentStream(ReadyState previousState) {
+    if (previousState == ReadyState.OPEN) {
+      try {
+        handler.onClosed();
+      } catch (Exception e) {
+        handler.onError(e);
+      }
+    }
+
+    if (call != null) {
+      // The call.cancel() must precede the bufferedSource.close().
+      // Otherwise, an IllegalArgumentException "Unbalanced enter/exit" error is thrown by okhttp.
+      // https://github.com/google/ExoPlayer/issues/1348
+      call.cancel();
+      logger.debug("call cancelled");
     }
   }
   
@@ -266,11 +297,14 @@ public class EventSource implements ConnectionHandler, Closeable {
         } catch (EOFException eofe) {
           logger.warn("Connection unexpectedly closed.");
         } catch (IOException ioe) {
-          if (readyState.get() != SHUTDOWN) {
+          ReadyState state = readyState.get();
+          if (state == SHUTDOWN) {
+            errorHandlerAction = ConnectionErrorHandler.Action.SHUTDOWN;
+          } else if (state == CLOSED) { // this happens if it's being restarted
+            errorHandlerAction = ConnectionErrorHandler.Action.PROCEED;
+          } else {
         	  	logger.debug("Connection problem.", ioe);
         	  	errorHandlerAction = dispatchError(ioe);
-          } else {
-        	  	errorHandlerAction = ConnectionErrorHandler.Action.SHUTDOWN;
           }
         } finally {
           ReadyState nextState = CLOSED;
@@ -302,6 +336,7 @@ public class EventSource implements ConnectionHandler, Closeable {
               handler.onError(e);
             }
           }
+
           // Reset the backoff if we had a successful connection that stayed good for at least
           // backoffResetThresholdMs milliseconds.
           if (connectedTime >= 0 && (System.currentTimeMillis() - connectedTime) >= backoffResetThresholdMs) {

@@ -24,7 +24,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.mockito.Mockito.mock;
 
-public class EventSourceTest {
+@SuppressWarnings("javadoc")
+public class EventSourceBuilderTest {
   private static final URI STREAM_URI = URI.create("http://www.example.com/");
   private static final HttpUrl STREAM_HTTP_URL = HttpUrl.parse("http://www.example.com/");
   private EventSource eventSource;

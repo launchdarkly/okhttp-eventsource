@@ -248,7 +248,7 @@ public class EventSourceHttpTest {
             eventSink.log.take());
         
         eventSink.assertNoMoreLogItems();
-        
+ 
         streamHandler1.interrupt(); // make first stream fail
         
         assertEquals(LogItem.closed(), eventSink.log.take());

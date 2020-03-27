@@ -23,7 +23,6 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.UnaryOperator;
 
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
@@ -165,11 +164,7 @@ public class EventSource implements Closeable {
    * the same as calling {@link #start()}.
    */
   public void restart() {
-    ReadyState previousState = readyState.getAndUpdate(new UnaryOperator<ReadyState>() {
-      public ReadyState apply(ReadyState t) {
-        return t == ReadyState.OPEN ? ReadyState.CLOSED : t;
-      }
-    });
+    ReadyState previousState = readyState.getAndUpdate(t -> t == ReadyState.OPEN ? ReadyState.CLOSED : t);
     if (previousState == OPEN) {
       closeCurrentStream(previousState);
     } else if (previousState == RAW || previousState == CONNECTING) {

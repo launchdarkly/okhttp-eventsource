@@ -2,6 +2,10 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [1.11.0] - 2020-03-30
+### Added:
+- New `EventSource` method `restart()` allows the caller to force a stream connection retry even if no I/O error has happened, using the same backoff behavior that would be used for errors.
+
 ## [1.10.2] - 2020-03-20
 ### Changed:
 - Updated OkHttp version to 3.12.10 (the latest version that still supports Java 7).

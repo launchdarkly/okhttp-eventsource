@@ -343,4 +343,30 @@ public class EventSourceHttpTest {
       assertEquals(LogItem.closed(), eventSink.log.take());
     }
   }
+  
+  @Test
+  public void newLastEventIdIsSentOnNextConnectAttempt() throws Exception {
+    String initialLastId = "123";
+    String newLastId = "099";
+    String body = "id: " + newLastId + "\ndata: first\n\n";
+    
+    TestHandler eventSink = new TestHandler();
+
+    StubServer.Handler streamHandler1 = stream(CONTENT_TYPE, streamProducerFromString(body, false));
+    StubServer.Handler streamHandler2 = stream(CONTENT_TYPE, streamProducerFromString("", true));
+    StubServer.Handler allRequests = forRequestsInSequence(streamHandler1, streamHandler2);
+
+    try (StubServer server = StubServer.start(allRequests)) {
+      try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
+          .lastEventId(initialLastId)
+          .build()) {
+        es.start();
+        
+        StubServer.RequestInfo req0 = server.awaitRequest();
+        StubServer.RequestInfo req1 = server.awaitRequest();
+        assertEquals(initialLastId, req0.getHeader("Last-Event-ID"));
+        assertEquals(newLastId, req1.getHeader("Last-Event-ID"));
+      }
+    }
+  }
 }

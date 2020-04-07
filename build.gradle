@@ -33,7 +33,7 @@ allprojects {
 }
 
 ext.versions = [
-	"okhttp": "4.4.1",
+	"okhttp": "4.5.0",
 	"slf4j": "1.7.22"
 ]
 

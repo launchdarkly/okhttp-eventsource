@@ -59,7 +59,7 @@ public final class StubServer implements Closeable {
         baseRequest.setHandled(true);
       }
     });
-    server.setStopTimeout(1); // without this, Jetty does not interrupt worker threads on shutdown
+    server.setStopTimeout(100); // without this, Jetty does not interrupt worker threads on shutdown
     
     try {
       server.start();

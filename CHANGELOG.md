@@ -17,11 +17,18 @@ All notable changes to the LaunchDarkly EventSource implementation for Java will
 ### Removed:
 - In `EventSource`: `setHttpUrl`, `setLastEventId`, `setMaxReconnectTime`, `setReconnectionTime`, `setUri` (these can only be set in the builder).
 
+## [1.11.0] - 2020-03-30
+### Added:
+- New `EventSource` method `restart()` allows the caller to force a stream connection retry even if no I/O error has happened, using the same backoff behavior that would be used for errors.
+
+## [1.10.2] - 2020-03-20
+### Changed:
+- Updated OkHttp version to 3.12.10 (the latest version that still supports Java 7).
+
 ## [1.10.1] - 2019-10-17
 ### Fixed:
 - Fixed trailing period in logger name. ([#34](https://github.com/launchdarkly/okhttp-eventsource/issues/34))
 - If you provide your own value for the `Accept` header using `EventSource.Builder.headers()`, it should not _also_ send the default `Accept: text/event-stream`, but replace it. ([#38](https://github.com/launchdarkly/okhttp-eventsource/issues/38))
-
 
 ## [1.10.0] - 2019-08-01
 ### Added:

@@ -313,7 +313,9 @@ public class EventSource implements Closeable {
         } finally {
           ReadyState nextState = CLOSED;
           if (errorHandlerAction == ConnectionErrorHandler.Action.SHUTDOWN) {
-            logger.info("Connection has been explicitly shut down by error handler");
+            if (readyState.get() != SHUTDOWN) {
+              logger.info("Connection has been explicitly shut down by error handler");
+            }
             nextState = SHUTDOWN;
           }
           currentState = readyState.getAndSet(nextState);
@@ -341,12 +343,14 @@ public class EventSource implements Closeable {
             }
           }
 
-          // Reset the backoff if we had a successful connection that stayed good for at least
-          // backoffResetThresholdMs milliseconds.
-          if (connectedTime >= 0 && (System.currentTimeMillis() - connectedTime) >= backoffResetThreshold.toMillis()) {
-            reconnectAttempts = 0;
+          if (nextState != SHUTDOWN) {
+            // Reset the backoff if we had a successful connection that stayed good for at least
+            // backoffResetThresholdMs milliseconds.
+            if (connectedTime >= 0 && (System.currentTimeMillis() - connectedTime) >= backoffResetThreshold.toMillis()) {
+              reconnectAttempts = 0;
+            }
+            maybeWaitWithBackoff(++reconnectAttempts);
           }
-          maybeWaitWithBackoff(++reconnectAttempts);
         }
       }
     } catch (RejectedExecutionException ignored) {

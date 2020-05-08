@@ -1,10 +1,20 @@
 version: 2
 jobs:
-   build:
-     docker:
-       - image: circleci/openjdk:8
-     environment:
-       - TERM: dumb
-     steps:
-       - checkout
-       - run: ./gradlew test sourcesJar javadocJar
+  build:
+    docker:
+      - image: circleci/openjdk:8
+    environment:
+      - TERM: dumb
+    steps:
+      - checkout
+      - run: ./gradlew test sourcesJar javadocJar
+      - run:
+          name: Save test results
+          command: |
+            mkdir -p ~/junit/;
+            find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/junit/ \;
+          when: always
+      - store_test_results:
+          path: ~/junit
+      - store_artifacts:
+          path: ~/junit

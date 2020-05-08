@@ -10,4 +10,7 @@
   <root level="info">
     <appender-ref ref="STDOUT" />
   </root>
+  
+  <!-- we don't need to see informational logging from the Jetty servers that we create during tests -->
+  <logger name="org.eclipse.jetty" level="ERROR" />
 </configuration>

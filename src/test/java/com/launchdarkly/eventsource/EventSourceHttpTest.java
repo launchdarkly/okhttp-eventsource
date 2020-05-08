@@ -3,6 +3,7 @@ package com.launchdarkly.eventsource;
 import com.launchdarkly.eventsource.Stubs.LogItem;
 import com.launchdarkly.eventsource.Stubs.TestHandler;
 
+import org.junit.Rule;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -33,6 +34,8 @@ import okhttp3.RequestBody;
 public class EventSourceHttpTest {
   private static final String CONTENT_TYPE = "text/event-stream";
   
+  @Rule public TestScopedLoggerRule testLogger = new TestScopedLoggerRule();
+
   // NOTE ABOUT KNOWN ISSUE: Intermittent test failures suggest that sometimes the handler's onClose()
   // method does not get called when the stream is completely shut down. This is not a new issue, and
   // it does not affect the way the LaunchDarkly SDKs use EventSource. So, for now, test assertions
@@ -46,6 +49,7 @@ public class EventSourceHttpTest {
     try (StubServer server = StubServer.start(hang())) {
       try (EventSource es = new EventSource.Builder(new TestHandler(), server.getUri().resolve(requestPath))
           .headers(headers)
+          .logger(testLogger.getLogger())
           .build()) {
         es.start();
         
@@ -68,6 +72,7 @@ public class EventSourceHttpTest {
       try (EventSource es = new EventSource.Builder(new TestHandler(), server.getUri())
           .method("report")
           .body(RequestBody.create("hello world", MediaType.parse("text/plain; charset=utf-8")))
+          .logger(testLogger.getLogger())
           .build()) {
         es.start();
         
@@ -85,6 +90,7 @@ public class EventSourceHttpTest {
     try (StubServer server = StubServer.start(hang())) {
       try (EventSource es = new EventSource.Builder(new TestHandler(), server.getUri())
           .lastEventId(lastId)
+          .logger(testLogger.getLogger())
           .build()) {
         es.start();
         
@@ -108,6 +114,7 @@ public class EventSourceHttpTest {
     try (StubServer server = StubServer.start(streamHandler)) {
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
           .reconnectTime(Duration.ofMillis(10))
+          .logger(testLogger.getLogger())
           .build()) {
         es.start();
         
@@ -141,7 +148,9 @@ public class EventSourceHttpTest {
         streamProducerFromChunkedString(body, 5, Duration.ZERO, true));
     
     try (StubServer server = StubServer.start(streamHandler)) {
-      try (EventSource es = new EventSource.Builder(eventSink, server.getUri()).build()) {
+      try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
+          .logger(testLogger.getLogger())
+          .build()) {
         es.start();
         
         assertEquals(LogItem.opened(), eventSink.awaitLogItem());
@@ -215,6 +224,7 @@ public class EventSourceHttpTest {
     try (StubServer server = StubServer.start(allRequests)) {            
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
           .reconnectTime(Duration.ofMillis(10))
+          .logger(testLogger.getLogger())
           .build()) {
         es.start();
        
@@ -247,6 +257,7 @@ public class EventSourceHttpTest {
     try (StubServer server = StubServer.start(allRequests)) {            
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
           .reconnectTime(Duration.ofMillis(10))
+          .logger(testLogger.getLogger())
           .build()) {
         es.start();
        
@@ -295,6 +306,7 @@ public class EventSourceHttpTest {
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
           .connectionErrorHandler(connectionErrorHandler)
           .reconnectTime(Duration.ofMillis(10))
+          .logger(testLogger.getLogger())
           .build()) {
         es.start();
        
@@ -326,6 +338,7 @@ public class EventSourceHttpTest {
     try (StubServer server = StubServer.start(allRequests)) {            
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
           .reconnectTime(Duration.ofMillis(10))
+          .logger(testLogger.getLogger())
           .build()) {
         es.start();
        
@@ -367,6 +380,7 @@ public class EventSourceHttpTest {
     try (StubServer server = StubServer.start(allRequests)) {
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
           .lastEventId(initialLastId)
+          .logger(testLogger.getLogger())
           .build()) {
         es.start();
         

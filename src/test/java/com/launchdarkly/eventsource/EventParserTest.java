@@ -1,7 +1,7 @@
 package com.launchdarkly.eventsource;
 
-import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 
 import java.net.URI;
@@ -18,22 +18,18 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
  */
 @SuppressWarnings("javadoc")
 public class EventParserTest {
-
   private static final URI ORIGIN = URI.create("http://host.com:99/foo");
   private EventHandler eventHandler;
   private ConnectionHandler connectionHandler;
   private EventParser parser;
 
+  @Rule public TestScopedLoggerRule testLogger = new TestScopedLoggerRule();
+  
   @Before
   public void setUp() throws Exception {
     eventHandler = mock(EventHandler.class);
     connectionHandler = mock(ConnectionHandler.class);
-    parser = new EventParser(ORIGIN, eventHandler, connectionHandler);
-  }
-
-  @After
-  public void tearDown() throws Exception {
-
+    parser = new EventParser(ORIGIN, eventHandler, connectionHandler, testLogger.getLogger());
   }
 
   @Test

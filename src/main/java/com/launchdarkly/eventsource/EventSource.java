@@ -1,8 +1,5 @@
 package com.launchdarkly.eventsource;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
@@ -107,7 +104,7 @@ public class EventSource implements Closeable {
     this.name = builder.name;
     String loggerName = EventSource.class.getCanonicalName() +
         (name == null || name.equals("") ? "" : "." + name);
-    this.logger = LoggerFactory.getLogger(loggerName);
+    this.logger = builder.logger == null ? new SLF4JLogger(loggerName) : builder.logger;
     this.url = builder.url;
     this.headers = addDefaultHeaders(builder.headers);
     this.method = builder.method;
@@ -150,7 +147,7 @@ public class EventSource implements Closeable {
       logger.info("Start method called on this already-started EventSource object. Doing nothing");
       return;
     }
-    logger.debug("readyState change: " + RAW + " -> " + CONNECTING);
+    logger.debug("readyState change: {} -> {}", RAW, CONNECTING);
     logger.info("Starting EventSource client using URI: " + url);
     streamExecutor.execute(this::connect);
   }
@@ -189,7 +186,7 @@ public class EventSource implements Closeable {
   @Override
   public void close() {
     ReadyState currentState = readyState.getAndSet(SHUTDOWN);
-    logger.debug("readyState change: " + currentState + " -> " + SHUTDOWN);
+    logger.debug("readyState change: {} -> {}", currentState, SHUTDOWN);
     if (currentState == SHUTDOWN) {
       return;
     }
@@ -226,7 +223,7 @@ public class EventSource implements Closeable {
       // Otherwise, an IllegalArgumentException "Unbalanced enter/exit" error is thrown by okhttp.
       // https://github.com/google/ExoPlayer/issues/1348
       call.cancel();
-      logger.debug("call cancelled");
+      logger.debug("call cancelled", null);
     }
   }
   
@@ -268,7 +265,7 @@ public class EventSource implements Closeable {
         long connectedTime = -1;
 
         ReadyState currentState = readyState.getAndSet(CONNECTING);
-        logger.debug("readyState change: " + currentState + " -> " + CONNECTING);
+        logger.debug("readyState change: {} -> {}", currentState, CONNECTING);
         try {        	  
           call = client.newCall(buildRequest());
           response = call.execute();
@@ -278,7 +275,7 @@ public class EventSource implements Closeable {
             if (currentState != CONNECTING) {
               logger.warn("Unexpected readyState change: " + currentState + " -> " + OPEN);
             } else {
-              logger.debug("readyState change: " + currentState + " -> " + OPEN);
+              logger.debug("readyState change: {} -> {}", currentState, OPEN);
             }
             logger.info("Connected to Event Source stream.");
             try {
@@ -290,12 +287,12 @@ public class EventSource implements Closeable {
               bufferedSource.close();
             }
             bufferedSource = Okio.buffer(response.body().source());
-            EventParser parser = new EventParser(url.uri(), handler, connectionHandler);
+            EventParser parser = new EventParser(url.uri(), handler, connectionHandler, logger);
             for (String line; !Thread.currentThread().isInterrupted() && (line = bufferedSource.readUtf8LineStrict()) != null; ) {
               parser.line(line);
             }
           } else {
-            logger.debug("Unsuccessful Response: " + response);
+            logger.debug("Unsuccessful response: {}", response);
             errorHandlerAction = dispatchError(new UnsuccessfulResponseException(response.code()));
           }
         } catch (EOFException eofe) {
@@ -307,7 +304,7 @@ public class EventSource implements Closeable {
           } else if (state == CLOSED) { // this happens if it's being restarted
             errorHandlerAction = ConnectionErrorHandler.Action.PROCEED;
           } else {
-        	  	logger.debug("Connection problem.", ioe);
+        	  	logger.debug("Connection problem: {}", ioe);
         	  	errorHandlerAction = dispatchError(ioe);
           }
         } finally {
@@ -319,19 +316,19 @@ public class EventSource implements Closeable {
             nextState = SHUTDOWN;
           }
           currentState = readyState.getAndSet(nextState);
-          logger.debug("readyState change: " + currentState + " -> " + nextState);
+          logger.debug("readyState change: {} -> {}", currentState, nextState);
 
           if (response != null && response.body() != null) {
             response.close();
-            logger.debug("response closed");
+            logger.debug("response closed", null);
           }
 
           if (bufferedSource != null) {
             try {
               bufferedSource.close();
-              logger.debug("buffered source closed");
+              logger.debug("buffered source closed", null);
             } catch (IOException e) {
-              logger.warn("Exception when closing bufferedSource", e);
+              logger.warn("Exception when closing bufferedSource: " + e.toString());
             }
           }
 
@@ -357,7 +354,7 @@ public class EventSource implements Closeable {
       call = null;
       response = null;
       bufferedSource = null;
-      logger.debug("Rejected execution exception ignored: ", ignored);
+      logger.debug("Rejected execution exception ignored: {}", ignored);
       // During shutdown, we tried to send a message to the event handler
       // Do not reconnect; the executor has been shut down
     }
@@ -526,6 +523,7 @@ public class EventSource implements Closeable {
     private RequestTransformer requestTransformer = null;
     private RequestBody body = null;
     private OkHttpClient.Builder clientBuilder;
+    private Logger logger = null;
     
     /**
      * Creates a new builder.
@@ -616,6 +614,9 @@ public class EventSource implements Closeable {
     /**
      * Set the name for this EventSource client to be used when naming the logger and threadpools. This is mainly useful when
      * multiple EventSource clients exist within the same process.
+     * <p>
+     * The name only affects logging when using the default SLF4J integration; if you have specified a custom
+     * {@link #logger(Logger)}, the name will not be included in log messages unless your logger implementation adds it.
      *
      * @param name the name (without any whitespaces)
      * @return the builder
@@ -842,6 +843,20 @@ public class EventSource implements Closeable {
      */
     public Builder clientBuilderActions(ClientConfigurer configurer) {
       configurer.configure(clientBuilder);
+      return this;
+    }
+    
+    /**
+     * Specifies a custom logger to receive EventSource logging.
+     * <p>
+     * If you do not provide a logger, the default is to send log output to SLF4J.
+     * 
+     * @param logger a {@link Logger} implementation, or null to use the default (SLF4J)
+     * @return the builder
+     * @since 2.3.0
+     */
+    public Builder logger(Logger logger) {
+      this.logger = logger;
       return this;
     }
     

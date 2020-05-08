@@ -69,29 +69,46 @@ class Stubs {
   }
   
   static class TestHandler implements EventHandler {
-    public final BlockingQueue<LogItem> log = new ArrayBlockingQueue<>(100);
+    private final BlockingQueue<LogItem> log = new ArrayBlockingQueue<>(100);
     
     public void onOpen() throws Exception {
-      log.add(LogItem.opened());
+      add(LogItem.opened());
     }
     
     public void onMessage(String event, MessageEvent messageEvent) throws Exception {
-      log.add(LogItem.event(event, messageEvent.getData(), messageEvent.getLastEventId()));
+      add(LogItem.event(event, messageEvent.getData(), messageEvent.getLastEventId()));
     }
     
     public void onError(Throwable t) {
-      log.add(LogItem.error(t));
+      add(LogItem.error(t));
     }
     
     public void onComment(String comment) throws Exception {
-      log.add(LogItem.comment(comment));
+      add(LogItem.comment(comment));
     }
     
     @Override
     public void onClosed() throws Exception {
-      log.add(LogItem.closed());
+      add(LogItem.closed());
     }
 
+    private void add(LogItem item) {
+      log.add(item);
+    }
+    
+    LogItem awaitLogItem() {
+      int timeoutSeconds = 10;
+      try {
+        LogItem item = log.poll(timeoutSeconds, TimeUnit.SECONDS);
+        if (item == null) {
+          throw new RuntimeException("handler did not get an expected call within " + timeoutSeconds + " seconds");
+        }
+        return item;
+      } catch (InterruptedException e) {
+        throw new RuntimeException("thread interrupted while waiting for handler to be called");
+      }
+    }
+    
     void assertNoMoreLogItems() {
       try {
         assertNull(log.poll(100, TimeUnit.MILLISECONDS));

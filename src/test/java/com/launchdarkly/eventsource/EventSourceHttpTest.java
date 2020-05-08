@@ -106,8 +106,8 @@ public class EventSourceHttpTest {
           .build()) {
         es.start();
         
-        assertEquals(Stubs.LogItem.opened(), eventSink.log.take());
-        assertEquals(Stubs.LogItem.event(eventType, eventData, newLastId), eventSink.log.take());
+        assertEquals(Stubs.LogItem.opened(), eventSink.awaitLogItem());
+        assertEquals(Stubs.LogItem.event(eventType, eventData, newLastId), eventSink.awaitLogItem());
 
         StubServer.RequestInfo r0 = server.awaitRequest();
         assertNull(r0.getHeader("Last-Event-Id"));
@@ -139,24 +139,24 @@ public class EventSourceHttpTest {
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri()).build()) {
         es.start();
         
-        assertEquals(LogItem.opened(), eventSink.log.take());
+        assertEquals(LogItem.opened(), eventSink.awaitLogItem());
         
         assertEquals(LogItem.event("message", "data-by-itself"), // "message" is the default event name, per SSE spec
-            eventSink.log.take());
+            eventSink.awaitLogItem());
 
         assertEquals(LogItem.event("event-with-data", "abc"),
-            eventSink.log.take());
+            eventSink.awaitLogItem());
  
         assertEquals(LogItem.comment("this is a comment"),
-            eventSink.log.take());
+            eventSink.awaitLogItem());
   
         assertEquals(LogItem.event("event-with-more-data-and-id",  "abc\ndef", "my-id"),
-            eventSink.log.take());
+            eventSink.awaitLogItem());
         
         eventSink.assertNoMoreLogItems();
       }
     }
-    assertEquals(LogItem.closed(), eventSink.log.take());
+    assertEquals(LogItem.closed(), eventSink.awaitLogItem());
   }
   
   @Test
@@ -176,24 +176,24 @@ public class EventSourceHttpTest {
           .build()) {
         es.start();
         
-        assertEquals(LogItem.opened(), eventSink.log.take());
+        assertEquals(LogItem.opened(), eventSink.awaitLogItem());
         
         assertEquals(LogItem.event("message", "first"),
-            eventSink.log.take());
+            eventSink.awaitLogItem());
 
         eventSink.assertNoMoreLogItems(); // should not have closed first stream yet
         
         streamHandler1.interrupt();
 
-        assertEquals(LogItem.closed(), eventSink.log.take());
+        assertEquals(LogItem.closed(), eventSink.awaitLogItem());
        
-        assertEquals(LogItem.opened(), eventSink.log.take());
+        assertEquals(LogItem.opened(), eventSink.awaitLogItem());
 
         assertEquals(LogItem.event("message", "second"),
-            eventSink.log.take());
+            eventSink.awaitLogItem());
       }
       
-      assertEquals(LogItem.closed(), eventSink.log.take());
+      assertEquals(LogItem.closed(), eventSink.awaitLogItem());
       eventSink.assertNoMoreLogItems();
     }
   }
@@ -214,17 +214,17 @@ public class EventSourceHttpTest {
         es.start();
        
         assertEquals(LogItem.error(new UnsuccessfulResponseException(500)),
-            eventSink.log.take());
+            eventSink.awaitLogItem());
         
-        assertEquals(LogItem.opened(), eventSink.log.take());
+        assertEquals(LogItem.opened(), eventSink.awaitLogItem());
         
         assertEquals(LogItem.event("message", "good"),
-            eventSink.log.take());
+            eventSink.awaitLogItem());
         
         eventSink.assertNoMoreLogItems();
       }
       
-      assertEquals(LogItem.closed(), eventSink.log.take());
+      assertEquals(LogItem.closed(), eventSink.awaitLogItem());
     }
   }
 
@@ -245,29 +245,29 @@ public class EventSourceHttpTest {
           .build()) {
         es.start();
        
-        assertEquals(LogItem.opened(), eventSink.log.take());
+        assertEquals(LogItem.opened(), eventSink.awaitLogItem());
         
         assertEquals(LogItem.event("message", "first"),
-            eventSink.log.take());
+            eventSink.awaitLogItem());
         
         eventSink.assertNoMoreLogItems();
  
         streamHandler1.interrupt(); // make first stream fail
         
-        assertEquals(LogItem.closed(), eventSink.log.take());
+        assertEquals(LogItem.closed(), eventSink.awaitLogItem());
         
         assertEquals(LogItem.error(new UnsuccessfulResponseException(500)),
-            eventSink.log.take());
+            eventSink.awaitLogItem());
         
-        assertEquals(LogItem.opened(), eventSink.log.take());
+        assertEquals(LogItem.opened(), eventSink.awaitLogItem());
         
         assertEquals(LogItem.event("message", "second"),
-            eventSink.log.take());
+            eventSink.awaitLogItem());
         
         eventSink.assertNoMoreLogItems();
       }
       
-      assertEquals(LogItem.closed(), eventSink.log.take());
+      assertEquals(LogItem.closed(), eventSink.awaitLogItem());
     }
   }
 
@@ -324,26 +324,26 @@ public class EventSourceHttpTest {
           .build()) {
         es.start();
        
-        assertEquals(LogItem.opened(), eventSink.log.take());
+        assertEquals(LogItem.opened(), eventSink.awaitLogItem());
         
         assertEquals(LogItem.event("message", "first"),
-            eventSink.log.take());
+            eventSink.awaitLogItem());
         
         eventSink.assertNoMoreLogItems();
         
         es.restart();
          
-        assertEquals(LogItem.closed(), eventSink.log.take()); // there shouldn't be any error notification, just "closed"
+        assertEquals(LogItem.closed(), eventSink.awaitLogItem()); // there shouldn't be any error notification, just "closed"
         
-        assertEquals(LogItem.opened(), eventSink.log.take());
+        assertEquals(LogItem.opened(), eventSink.awaitLogItem());
         
         assertEquals(LogItem.event("message", "second"),
-            eventSink.log.take());
+            eventSink.awaitLogItem());
         
         eventSink.assertNoMoreLogItems();
       }
       
-      assertEquals(LogItem.closed(), eventSink.log.take());
+      assertEquals(LogItem.closed(), eventSink.awaitLogItem());
     }
   }
   

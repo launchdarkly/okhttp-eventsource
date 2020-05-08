@@ -7,6 +7,8 @@ import org.junit.Test;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -18,6 +20,7 @@ import static com.launchdarkly.eventsource.StubServer.Handlers.stream;
 import static com.launchdarkly.eventsource.StubServer.Handlers.streamProducerFromChunkedString;
 import static com.launchdarkly.eventsource.StubServer.Handlers.streamProducerFromString;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -368,5 +371,55 @@ public class EventSourceHttpTest {
         assertEquals(newLastId, req1.getHeader("Last-Event-ID"));
       }
     }
+  }
+
+  @Test
+  public void defaultThreadPriorityIsNotMaximum() throws Exception {
+    StubServer.Handler streamHandler = stream(CONTENT_TYPE, streamProducerFromString("", false));
+    
+    ThreadCapturingHandler threadCapturingHandler = new ThreadCapturingHandler();
+    
+    try (StubServer server = StubServer.start(streamHandler)) {
+      try (EventSource es = new EventSource.Builder(threadCapturingHandler, server.getUri())
+          .build()) {
+        es.start();
+        
+        Thread handlerThread = threadCapturingHandler.capturedThreads.take();
+        
+        assertNotEquals(Thread.MAX_PRIORITY, handlerThread.getPriority());
+      }
+    }
+  }
+  
+  @Test
+  public void canSetSpecificThreadPriority() throws Exception {
+    StubServer.Handler streamHandler = stream(CONTENT_TYPE, streamProducerFromString("", false));
+    
+    ThreadCapturingHandler threadCapturingHandler = new ThreadCapturingHandler();
+    
+    try (StubServer server = StubServer.start(streamHandler)) {
+      try (EventSource es = new EventSource.Builder(threadCapturingHandler, server.getUri())
+          .threadPriority(Thread.MAX_PRIORITY)
+          .build()) {
+        es.start();
+        
+        Thread handlerThread = threadCapturingHandler.capturedThreads.take();
+        
+        assertEquals(Thread.MAX_PRIORITY, handlerThread.getPriority());
+      }
+    }
+  }
+  
+  private static class ThreadCapturingHandler implements EventHandler {
+    final BlockingQueue<Thread> capturedThreads = new LinkedBlockingQueue<>();
+    
+    public void onOpen() throws Exception {
+      capturedThreads.add(Thread.currentThread());
+    }
+    
+    public void onMessage(String event, MessageEvent messageEvent) throws Exception {}
+    public void onError(Throwable t) {}
+    public void onComment(String comment) {}
+    public void onClosed() {}
   }
 }

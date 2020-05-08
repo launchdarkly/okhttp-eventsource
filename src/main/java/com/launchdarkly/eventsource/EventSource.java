@@ -117,9 +117,9 @@ public class EventSource implements Closeable {
     this.reconnectTime = builder.reconnectTime;
     this.maxReconnectTime = builder.maxReconnectTime;
     this.backoffResetThreshold = builder.backoffResetThreshold;
-    ThreadFactory eventsThreadFactory = createThreadFactory("okhttp-eventsource-events");
+    ThreadFactory eventsThreadFactory = createThreadFactory("okhttp-eventsource-events", builder.threadPriority);
     this.eventExecutor = Executors.newSingleThreadExecutor(eventsThreadFactory);
-    ThreadFactory streamThreadFactory = createThreadFactory("okhttp-eventsource-stream");
+    ThreadFactory streamThreadFactory = createThreadFactory("okhttp-eventsource-stream", builder.threadPriority);
     this.streamExecutor = Executors.newSingleThreadExecutor(streamThreadFactory);
     this.handler = new AsyncEventHandler(this.eventExecutor, builder.handler);
     this.connectionErrorHandler = builder.connectionErrorHandler;
@@ -127,14 +127,16 @@ public class EventSource implements Closeable {
     this.client = builder.clientBuilder.build();
   }
 
-  private ThreadFactory createThreadFactory(final String type) {
-    final ThreadFactory backingThreadFactory =
-        Executors.defaultThreadFactory();
+  private ThreadFactory createThreadFactory(final String type, final Integer threadPriority) {
+    final ThreadFactory backingThreadFactory = Executors.defaultThreadFactory();
     final AtomicLong count = new AtomicLong(0);
     return runnable -> {
       Thread thread = backingThreadFactory.newThread(runnable);
       thread.setName(format(Locale.ROOT, "%s-[%s]-%d", type, name, count.getAndIncrement()));
       thread.setDaemon(true);
+      if (threadPriority != null) {
+        thread.setPriority(threadPriority);
+      }
       return thread;
     };
   }
@@ -512,6 +514,7 @@ public class EventSource implements Closeable {
     private final HttpUrl url;
     private final EventHandler handler;
     private ConnectionErrorHandler connectionErrorHandler = ConnectionErrorHandler.DEFAULT;
+    private Integer threadPriority = null;
     private Headers headers = Headers.of();
     private Proxy proxy;
     private Authenticator proxyAuthenticator = null;
@@ -791,6 +794,21 @@ public class EventSource implements Closeable {
       return this;
     }
 
+    /**
+     * Specifies the priority for threads created by {@code EventSource}.
+     * <p>
+     * If this is left unset, or set to {@code null}, threads will inherit the default priority
+     * provided by {@code Executors.defaultThreadFactory()}.
+     * 
+     * @param threadPriority the thread priority, or null to ue the default
+     * @return the builder
+     * @since 2.2.0
+     */
+    public Builder threadPriority(Integer threadPriority) {
+      this.threadPriority = threadPriority;
+      return this;
+    }
+    
     /**
      * Specifies any type of configuration actions you want to perform on the OkHttpClient builder.
      * <p>

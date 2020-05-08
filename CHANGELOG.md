@@ -2,6 +2,10 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [2.2.0] - 2020-05-08
+### Added:
+- `EventSource.Builder.threadPriority()` specifies that `EventSource` should create its worker threads with a specific priority.
+
 ## [2.1.0] - 2020-04-29
 ### Added:
 - `EventSource` method `restart()` (also added in 1.11.0).

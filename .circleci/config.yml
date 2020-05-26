@@ -61,7 +61,6 @@ jobs:
       - image: <<parameters.docker-image>>
     steps:
       - checkout
-      - run: cp gradle.properties.example gradle.properties
       - attach_workspace:
           at: build
       - run: java -version
@@ -103,7 +102,6 @@ jobs:
       - run:
           name: build and test
           command: |
-            cp gradle.properties.example gradle.properties
             .\gradlew.bat --no-daemon test  # must use --no-daemon because CircleCI in Windows will hang if there's a daemon running
       - run:
           name: save test results

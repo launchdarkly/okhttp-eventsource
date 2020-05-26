@@ -102,9 +102,13 @@ public class EventSource implements Closeable {
 
   EventSource(Builder builder) {
     this.name = builder.name;
-    String loggerName = EventSource.class.getCanonicalName() +
-        (name == null || name.equals("") ? "" : "." + name);
-    this.logger = builder.logger == null ? new SLF4JLogger(loggerName) : builder.logger;
+    if (builder.logger == null) {
+      String loggerName = (builder.loggerBaseName == null ? EventSource.class.getCanonicalName() : builder.loggerBaseName) +
+          (name == null || name.equals("") ? "" : ("." + name));
+      this.logger = new SLF4JLogger(loggerName);
+    } else {
+      this.logger = builder.logger;
+    }
     this.url = builder.url;
     this.headers = addDefaultHeaders(builder.headers);
     this.method = builder.method;
@@ -524,6 +528,7 @@ public class EventSource implements Closeable {
     private RequestBody body = null;
     private OkHttpClient.Builder clientBuilder;
     private Logger logger = null;
+    private String loggerBaseName = null;
     
     /**
      * Creates a new builder.
@@ -857,6 +862,22 @@ public class EventSource implements Closeable {
      */
     public Builder logger(Logger logger) {
       this.logger = logger;
+      return this;
+    }
+
+    /**
+     * Specifies the base logger name to use for SLF4J logging.
+     * <p>
+     * The default is {@code com.launchdarkly.eventsource.EventSource}, plus any name suffix specified
+     * by {@link #name(String)}. If you instead use {@link #logger(Logger)} to specify some other log
+     * destination rather than SLF4J, this name is unused.
+     * 
+     * @param loggerBaseName the SLF4J logger name, or null to use the default
+     * @return the builder
+     * @since 2.3.0
+     */
+    public Builder loggerBaseName(String loggerBaseName) {
+      this.loggerBaseName = loggerBaseName;
       return this;
     }
     

@@ -37,7 +37,6 @@ jobs:
       - image: circleci/openjdk:8u131-jdk # To match the version pre-installed in Ubuntu 16 and used by Jenkins for releasing 
     steps:
       - checkout
-      - run: cp gradle.properties.example gradle.properties
       - run: java -version
       - run: ./gradlew dependencies
       - run: ./gradlew jar

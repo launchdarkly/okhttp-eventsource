@@ -1,13 +1,75 @@
-version: 2
+version: 2.1
+
+orbs:
+   win: circleci/windows@1.0.0
+
+workflows:
+  test:
+    jobs:
+      - build-linux
+      - test-linux:
+          name: Java 8 - Linux - OpenJDK
+          docker-image: circleci/openjdk:8
+          requires:
+            - build-linux
+      - test-linux:
+          name: Java 9 - Linux - OpenJDK
+          docker-image: circleci/openjdk:9
+          requires:
+            - build-linux
+      - test-linux:
+          name: Java 10 - Linux - OpenJDK
+          docker-image: circleci/openjdk:10
+          requires:
+            - build-linux
+      - test-linux:
+          name: Java 11 - Linux - OpenJDK
+          docker-image: circleci/openjdk:11
+          with-coverage: true
+          requires:
+            - build-linux
+      - build-test-windows:
+          name: Java 11 - Windows - OpenJDK
+
 jobs:
-  build:
+  build-linux:
     docker:
-      - image: circleci/openjdk:8
-    environment:
-      - TERM: dumb
+      - image: circleci/openjdk:8u131-jdk # To match the version pre-installed in Ubuntu 16 and used by Jenkins for releasing 
     steps:
       - checkout
-      - run: ./gradlew test sourcesJar javadocJar
+      - run: java -version
+      - run: ./gradlew dependencies
+      - run: ./gradlew jar
+      - run: ./gradlew checkstyleMain
+      - persist_to_workspace:
+          root: build
+          paths:
+            - classes
+
+  test-linux:
+    parameters:
+      docker-image:
+        type: string
+      with-coverage:
+        type: boolean
+        default: false
+      check-javadoc:
+        type: boolean
+        default: false
+    docker:
+      - image: <<parameters.docker-image>>
+    steps:
+      - checkout
+      - attach_workspace:
+          at: build
+      - run: java -version
+      - run: ./gradlew test
+      - when:
+          condition: <<parameters.with-coverage>>
+          steps:
+            - run:
+                name: Generate test coverage report
+                command: ./gradlew jacocoTestReport
       - run:
           name: Save test results
           command: |
@@ -18,3 +80,34 @@ jobs:
           path: ~/junit
       - store_artifacts:
           path: ~/junit
+      - when:
+          condition: <<parameters.with-coverage>>
+          steps:
+            - store_artifacts:
+                path: build/reports/jacoco
+
+  build-test-windows:
+    executor:
+      name: win/vs2019
+      shell: powershell.exe
+    steps:
+      - checkout
+      - run:
+          name: install OpenJDK
+          command: |
+            $ProgressPreference = "SilentlyContinue"  # prevents console errors from CircleCI host
+            iwr -outf openjdk.msi https://developers.redhat.com/download-manager/file/java-11-openjdk-11.0.5.10-2.windows.redhat.x86_64.msi
+            Start-Process msiexec.exe -Wait -ArgumentList '/I openjdk.msi /quiet'
+      - run:
+          name: build and test
+          command: |
+            .\gradlew.bat --no-daemon test  # must use --no-daemon because CircleCI in Windows will hang if there's a daemon running
+      - run:
+          name: save test results
+          command: |
+            mkdir .\junit
+            cp build/test-results/test/*.xml junit
+      - store_test_results:
+          path: .\junit
+      - store_artifacts:
+          path: .\junit

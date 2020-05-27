@@ -49,6 +49,10 @@ dependencies {
     testImplementation "org.hamcrest:hamcrest-all:1.3" 
 }
 
+checkstyle {
+    configFile file("${project.rootDir}/checkstyle.xml")
+}
+
 jar {
     manifest {
         attributes("Implementation-Version": project.version)

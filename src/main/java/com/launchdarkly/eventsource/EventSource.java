@@ -375,30 +375,15 @@ public class EventSource implements ConnectionHandler, Closeable {
   }
 
   long backoffWithJitter(int reconnectAttempts) {
-    long jitterVal = Math.min(maxReconnectTimeMs, reconnectTimeMs * pow2(reconnectAttempts));
-    return jitterVal / 2 + nextLong(jitter, jitterVal) / 2;
+    long maxTimeLong = Math.min(maxReconnectTimeMs, reconnectTimeMs * pow2(reconnectAttempts));
+    // 2^31 milliseconds is much longer than any reconnect time we would reasonably want to use, so we can pin this to int
+    int maxTimeInt = maxTimeLong > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int)maxTimeLong;
+    return maxTimeInt / 2 + jitter.nextInt(maxTimeInt) / 2;
   }
 
   // Returns 2**k, or Integer.MAX_VALUE if 2**k would overflow
   private int pow2(int k) {
     return (k < Integer.SIZE - 1) ? (1 << k) : Integer.MAX_VALUE;
-  }
-
-  // Adapted from http://stackoverflow.com/questions/2546078/java-random-long-number-in-0-x-n-range
-  // Since ThreadLocalRandom.current().nextLong(n) requires Android 5
-  private long nextLong(Random rand, long bound) {
-    if (bound <= 0) {
-      throw new IllegalArgumentException("bound must be positive");
-    }
-
-    long r = rand.nextLong() & Long.MAX_VALUE;
-    long m = bound - 1L;
-    if ((bound & m) == 0) { // i.e., bound is a power of 2
-      r = (bound * r) >> (Long.SIZE - 1);
-    } else {
-      for (long u = r; u - (r = u % bound) + m < 0L; u = rand.nextLong() & Long.MAX_VALUE) ;
-    }
-    return r;
   }
 
   private static Headers addDefaultHeaders(Headers custom) {

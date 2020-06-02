@@ -2,6 +2,17 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [2.3.0] - 2020-06-02
+### Added:
+- `EventSource.Builder.logger()` and the `Logger` interface allow a custom logging implementation to be used instead of SLF4J.
+- `EventSource.Builder.loggerBaseName()` allows customization of the logger name when using the default SLF4J implementation.
+- Greatly improved unit test coverage; the CI build will now enforce coverage goals (see `CONTRIBUTING.md`).
+
+### Fixed:
+- Explicitly closing the stream could cause a misleading log line saying that the connection error handler had shut it down.
+- Explicitly closing the stream could also cause an unnecessary backoff delay (with a log line about waiting X amount of time) before the stream task actually shut down.
+- Fixed a bug that could cause the randomized jitter not to be applied to reconnection delays if the reconnect interval (in milliseconds) was a power of two.
+
 ## [2.2.0] - 2020-05-08
 ### Added:
 - `EventSource.Builder.threadPriority()` specifies that `EventSource` should create its worker threads with a specific priority.

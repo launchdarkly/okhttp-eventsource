@@ -96,6 +96,54 @@ jacocoTestReport { // code coverage report
     }
 }
 
+jacocoTestCoverageVerification {
+    // See notes in CONTRIBUTING.md on code coverage. Unfortunately we can't configure line-by-line code
+    // coverage overrides within the source code itself, because Jacoco operates on bytecode.
+    violationRules { rules ->
+        def knownMissedLinesForMethods = [
+            // The key for each of these items is the complete method signature minus the "com.launchdarkly.eventsource." prefix.
+            "EventSource.connect()": 12,
+            "EventSource.Builder.createInitialClientBuilder()": 1,
+            "EventSource.Builder.defaultTrustManager()": 2,
+            "SLF4JLogger.error(java.lang.String)": 2,
+            "ModernTLSSocketFactory.createSocket(java.lang.String, int)": 1,
+            "ModernTLSSocketFactory.createSocket(java.lang.String, int, java.net.InetAddress, int)": 1,
+            "ModernTLSSocketFactory.createSocket(java.net.InetAddress, int)": 1,
+            "ModernTLSSocketFactory.createSocket(java.net.InetAddress, int, java.net.InetAddress, int)": 1,
+            "ModernTLSSocketFactory.createSocket(java.net.Socket, java.lang.String, int, boolean)": 1,
+            "ModernTLSSocketFactory.getDefaultCipherSuites()": 1,
+            "ModernTLSSocketFactory.getSupportedCipherSuites()": 1
+        ]
+        
+        knownMissedLinesForMethods.each { partialSignature, maxMissedLines ->
+            if (maxMissedLines > 0) {  // < 0 means skip entire method
+                rules.rule {
+                    element = "METHOD"
+                    includes = [ "com.launchdarkly.eventsource." + partialSignature ]
+                    limit {
+                        counter = "LINE"
+                        value = "MISSEDCOUNT"
+                        maximum = maxMissedLines
+                    }
+                }
+            }
+        }
+        
+        // General rule that we should expect 100% test coverage; exclude any methods that have overrides above
+        rule {
+            element = "METHOD"
+            limit {
+                counter = "LINE"
+                value = "MISSEDCOUNT"
+                maximum = 0
+            }
+            excludes = knownMissedLinesForMethods.collect { partialSignature, maxMissedLines ->
+                "com.launchdarkly.eventsource." + partialSignature
+            }
+        }
+    }
+}
+
 idea {
     module {
         downloadJavadoc = true

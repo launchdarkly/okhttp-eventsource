@@ -10,10 +10,16 @@ class Stubs {
   static class LogItem {
     private final String action;
     private final String[] params;
-    
-    private LogItem(String action, String[] params) {
+    final Throwable error;
+
+    private LogItem(String action, String[] params, Throwable error) {
       this.action = action;
       this.params = params;
+      this.error = error;
+    }
+
+    private LogItem(String action, String[] params) {
+      this(action, params, null);
     }
 
     public static LogItem opened() {
@@ -41,7 +47,7 @@ class Stubs {
     }
     
     public static LogItem error(Throwable t) {
-      return new LogItem("error", new String[] { t.toString() });
+      return new LogItem("error", new String[] { t.toString() }, t);
     }
     
     public String toString() {
@@ -70,29 +76,56 @@ class Stubs {
   
   static class TestHandler implements EventHandler {
     private final BlockingQueue<LogItem> log = new ArrayBlockingQueue<>(100);
+    private final Logger logger;
+    volatile RuntimeException fakeError = null;
+    volatile RuntimeException fakeErrorFromErrorHandler = null;
+    
+    public TestHandler() {
+      this(null);
+    }
+    
+    public TestHandler(Logger logger) {
+      this.logger = logger;
+    }
+    
+    private void maybeError() {
+      if (fakeError != null) {
+        throw fakeError;
+      }
+    }
     
     public void onOpen() throws Exception {
       add(LogItem.opened());
+      maybeError();
     }
     
     public void onMessage(String event, MessageEvent messageEvent) throws Exception {
       add(LogItem.event(event, messageEvent.getData(), messageEvent.getLastEventId()));
+      maybeError();
     }
     
     public void onError(Throwable t) {
       add(LogItem.error(t));
+      if (fakeErrorFromErrorHandler != null) {
+        throw fakeErrorFromErrorHandler;
+      }
     }
     
     public void onComment(String comment) throws Exception {
       add(LogItem.comment(comment));
+      maybeError();
     }
     
     @Override
     public void onClosed() throws Exception {
       add(LogItem.closed());
+      maybeError();
     }
 
     private void add(LogItem item) {
+      if (logger != null) {
+        logger.debug("TestHandler received: {}", item);
+      }
       log.add(item);
     }
     

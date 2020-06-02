@@ -7,9 +7,11 @@ import org.slf4j.LoggerFactory;
  */
 class SLF4JLogger implements Logger {
   private final org.slf4j.Logger slf4jLogger;
+  final String name;
   
   SLF4JLogger(String loggerName) {
     this.slf4jLogger = LoggerFactory.getLogger(loggerName);
+    this.name = loggerName;
   }
 
   @Override
@@ -34,6 +36,7 @@ class SLF4JLogger implements Logger {
 
   @Override
   public void error(String message) {
+    // COVERAGE: the unit tests do not exercise this method because the library currently never logs at error level.
     slf4jLogger.error(message);
   }
 }

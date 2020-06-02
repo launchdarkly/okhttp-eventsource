@@ -25,6 +25,7 @@ import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
 
+import static com.launchdarkly.eventsource.Helpers.pow2;
 import static com.launchdarkly.eventsource.ReadyState.CLOSED;
 import static com.launchdarkly.eventsource.ReadyState.CONNECTING;
 import static com.launchdarkly.eventsource.ReadyState.OPEN;
@@ -49,7 +50,7 @@ import okio.Okio;
  * aka EventSource
  */
 public class EventSource implements Closeable {
-  private final Logger logger;
+  final Logger logger; // visible for tests
 
   /**
    * The default value for {@link Builder#reconnectTime(Duration)}: 1 second.
@@ -87,11 +88,11 @@ public class EventSource implements Closeable {
   private final RequestTransformer requestTransformer;
   private final ExecutorService eventExecutor;
   private final ExecutorService streamExecutor;
-  private Duration reconnectTime;
-  private Duration maxReconnectTime;
-  private final Duration backoffResetThreshold;
+  volatile Duration reconnectTime; // visible for tests
+  final Duration maxReconnectTime; // visible for tests
+  final Duration backoffResetThreshold; // visible for tests
   private volatile String lastEventId;
-  private final EventHandler handler;
+  private final AsyncEventHandler handler;
   private final ConnectionErrorHandler connectionErrorHandler;
   private final AtomicReference<ReadyState> readyState;
   private final OkHttpClient client;
@@ -101,10 +102,10 @@ public class EventSource implements Closeable {
   private BufferedSource bufferedSource;
 
   EventSource(Builder builder) {
-    this.name = builder.name;
+    this.name = builder.name == null ? "" : builder.name;
     if (builder.logger == null) {
       String loggerName = (builder.loggerBaseName == null ? EventSource.class.getCanonicalName() : builder.loggerBaseName) +
-          (name == null || name.equals("") ? "" : ("." + name));
+          (name.isEmpty() ? "" : ("." + name));
       this.logger = new SLF4JLogger(loggerName);
     } else {
       this.logger = builder.logger;
@@ -122,7 +123,7 @@ public class EventSource implements Closeable {
     this.eventExecutor = Executors.newSingleThreadExecutor(eventsThreadFactory);
     ThreadFactory streamThreadFactory = createThreadFactory("okhttp-eventsource-stream", builder.threadPriority);
     this.streamExecutor = Executors.newSingleThreadExecutor(streamThreadFactory);
-    this.handler = new AsyncEventHandler(this.eventExecutor, builder.handler);
+    this.handler = new AsyncEventHandler(this.eventExecutor, builder.handler, logger);
     this.connectionErrorHandler = builder.connectionErrorHandler;
     this.readyState = new AtomicReference<>(RAW);
     this.client = builder.clientBuilder.build();
@@ -170,10 +171,10 @@ public class EventSource implements Closeable {
     ReadyState previousState = readyState.getAndUpdate(t -> t == ReadyState.OPEN ? ReadyState.CLOSED : t);
     if (previousState == OPEN) {
       closeCurrentStream(previousState);
-    } else if (previousState == RAW || previousState == CONNECTING) {
+    } else if (previousState == RAW) {
       start();
     }
-    // if already shutdown or in the process of closing, do nothing
+    // if already connecting or already shutdown or in the process of closing, do nothing
   }
   
   /**
@@ -200,26 +201,22 @@ public class EventSource implements Closeable {
     eventExecutor.shutdownNow();
     streamExecutor.shutdownNow();
 
-    if (client != null) {
-      if (client.connectionPool() != null) {
-        client.connectionPool().evictAll();
-      }
-      if (client.dispatcher() != null) {
-        client.dispatcher().cancelAll();
-        if (client.dispatcher().executorService() != null) {
-          client.dispatcher().executorService().shutdownNow();
-        }
+    // COVERAGE: these null guards are here for safety but in practice the values are never null and there
+    // is no way to cause them to be null in unit tests
+    if (client.connectionPool() != null) {
+      client.connectionPool().evictAll();
+    }
+    if (client.dispatcher() != null) {
+      client.dispatcher().cancelAll();
+      if (client.dispatcher().executorService() != null) {
+        client.dispatcher().executorService().shutdownNow();
       }
     }
   }
   
   private void closeCurrentStream(ReadyState previousState) {
     if (previousState == ReadyState.OPEN) {
-      try {
-        handler.onClosed();
-      } catch (Exception e) {
-        handler.onError(e);
-      }
+      handler.onClosed();
     }
 
     if (call != null) {
@@ -277,21 +274,19 @@ public class EventSource implements Closeable {
             connectedTime = System.currentTimeMillis();
             currentState = readyState.getAndSet(OPEN);
             if (currentState != CONNECTING) {
+              // COVERAGE: there is no way to simulate this condition in unit tests
               logger.warn("Unexpected readyState change: " + currentState + " -> " + OPEN);
             } else {
               logger.debug("readyState change: {} -> {}", currentState, OPEN);
             }
             logger.info("Connected to Event Source stream.");
-            try {
-              handler.onOpen();
-            } catch (Exception e) {
-              handler.onError(e);
-            }
+            handler.onOpen();
             if (bufferedSource != null) {
               bufferedSource.close();
             }
             bufferedSource = Okio.buffer(response.body().source());
             EventParser parser = new EventParser(url.uri(), handler, connectionHandler, logger);
+            // COVERAGE: the isInterrupted() condition is not encountered in unit tests and it's unclear if it can ever happen
             for (String line; !Thread.currentThread().isInterrupted() && (line = bufferedSource.readUtf8LineStrict()) != null; ) {
               parser.line(line);
             }
@@ -308,6 +303,7 @@ public class EventSource implements Closeable {
           } else if (state == CLOSED) { // this happens if it's being restarted
             errorHandlerAction = ConnectionErrorHandler.Action.PROCEED;
           } else {
+            // COVERAGE: there is no way to simulate this condition in unit tests - closing the stream causes EOFException
         	  	logger.debug("Connection problem: {}", ioe);
         	  	errorHandlerAction = dispatchError(ioe);
           }
@@ -332,16 +328,13 @@ public class EventSource implements Closeable {
               bufferedSource.close();
               logger.debug("buffered source closed", null);
             } catch (IOException e) {
+              // COVERAGE: there is no way to simulate this condition in unit tests
               logger.warn("Exception when closing bufferedSource: " + e.toString());
             }
           }
 
           if (currentState == ReadyState.OPEN) {
-            try {
-              handler.onClosed();
-            } catch (Exception e) {
-              handler.onError(e);
-            }
+            handler.onClosed();
           }
 
           if (nextState != SHUTDOWN) {
@@ -355,6 +348,7 @@ public class EventSource implements Closeable {
         }
       }
     } catch (RejectedExecutionException ignored) {
+      // COVERAGE: there is no way to simulate this condition in unit tests
       call = null;
       response = null;
       bufferedSource = null;
@@ -390,11 +384,6 @@ public class EventSource implements Closeable {
     return Duration.ofMillis(maxTimeInt / 2 + jitter.nextInt(maxTimeInt) / 2);
   }
 
-  // Returns 2**k, or Integer.MAX_VALUE if 2**k would overflow
-  private int pow2(int k) {
-    return (k < Integer.SIZE - 1) ? (1 << k) : Integer.MAX_VALUE;
-  }
-
   private static Headers addDefaultHeaders(Headers custom) {
     Headers.Builder builder = new Headers.Builder();
 
@@ -419,7 +408,7 @@ public class EventSource implements Closeable {
   // to stream events. From an application's point of view, these properties can only be set at
   // configuration time via the builder.
   private void setReconnectionTime(Duration reconnectionTime) {
-    this.reconnectTime = reconnectionTime == null ? DEFAULT_RECONNECT_TIME : reconnectionTime;
+    this.reconnectTime = reconnectionTime;
   }
 
   private void setLastEventId(String lastEventId) {
@@ -496,7 +485,7 @@ public class EventSource implements Closeable {
    * Builder for {@link EventSource}.
    */
   public static final class Builder {
-    private String name = "";
+    private String name;
     private Duration reconnectTime = DEFAULT_RECONNECT_TIME;
     private Duration maxReconnectTime = DEFAULT_MAX_RECONNECT_TIME;
     private Duration backoffResetThreshold = DEFAULT_BACKOFF_RESET_THRESHOLD;
@@ -558,6 +547,7 @@ public class EventSource implements Closeable {
         b.sslSocketFactory(new ModernTLSSocketFactory(), defaultTrustManager());
       } catch (GeneralSecurityException e) {
         // TLS is not available, so don't set up the socket factory, swallow the exception
+        // COVERAGE: There is no way to cause this to happen in unit tests
       }
       return b;
     }
@@ -567,13 +557,11 @@ public class EventSource implements Closeable {
      * <p>
      * Defaults to "GET".
      *
-     * @param method the HTTP method name
+     * @param method the HTTP method name; if null or empty, "GET" is used as the default
      * @return the builder
      */
     public Builder method(String method) {
-      if (method != null && method.length() > 0) {
-        this.method = method.toUpperCase();
-      }
+      this.method = (method != null && method.length() > 0) ? method.toUpperCase() : "GET";
       return this;
     }
 
@@ -612,9 +600,7 @@ public class EventSource implements Closeable {
      * @return the builder
      */
     public Builder name(String name) {
-      if (name != null) {
-        this.name = name;
-      }
+      this.name = name;
       return this;
     }
 
@@ -783,9 +769,7 @@ public class EventSource implements Closeable {
      * @return the builder
      */
     public Builder connectionErrorHandler(ConnectionErrorHandler handler) {
-      if (handler != null) {
-        this.connectionErrorHandler = handler;
-      }
+      this.connectionErrorHandler = handler;
       return this;
     }
 
@@ -892,6 +876,7 @@ public class EventSource implements Closeable {
       trustManagerFactory.init((KeyStore) null);
       TrustManager[] trustManagers = trustManagerFactory.getTrustManagers();
       if (trustManagers.length != 1 || !(trustManagers[0] instanceof X509TrustManager)) {
+        // COVERAGE: There is no way to cause this to happen in unit tests
         throw new IllegalStateException("Unexpected default trust managers:"
                 + Arrays.toString(trustManagers));
       }

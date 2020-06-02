@@ -4,6 +4,7 @@ import org.junit.rules.TestName;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.regex.Matcher;
 
 @SuppressWarnings("javadoc")
 public class TestScopedLoggerRule extends TestName {
@@ -49,7 +50,7 @@ public class TestScopedLoggerRule extends TestName {
     }
     
     private static String substitute(String format, Object param) {
-      return format.replaceFirst("\\{\\}", param == null ? "" : param.toString());
+      return format.replaceFirst("\\{\\}", param == null ? "" : Matcher.quoteReplacement(param.toString()));
     }
   }
 }

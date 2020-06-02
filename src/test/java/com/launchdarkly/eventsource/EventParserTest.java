@@ -7,7 +7,9 @@ import org.junit.Test;
 import java.net.URI;
 import java.time.Duration;
 
+import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -105,6 +107,16 @@ public class EventParserTest {
   }
 
   @Test
+  public void ignoresUnknownFieldName() throws Exception {
+    parser.line("data: hello");
+    parser.line("badfield: whatever");
+    parser.line("id: 1");
+    parser.line("");
+
+    verify(eventHandler).onMessage(eq("message"), eq(new MessageEvent("hello", "1", ORIGIN)));
+  }
+
+  @Test
   public void usesTheEventIdOfPreviousEventIfNoneSet() throws Exception {
     parser.line("data: hello");
     parser.line("id: reused");
@@ -141,5 +153,44 @@ public class EventParserTest {
 
     verify(eventHandler).onMessage(eq("message"), eq(new MessageEvent("", null, ORIGIN)));
     verifyNoMoreInteractions(eventHandler);
+  }
+  
+  @Test
+  public void catchesAndRedispatchesErrorFromHandlerOnMessage() throws Exception {
+    RuntimeException err = new RuntimeException("sorry");
+    doThrow(err).when(eventHandler).onMessage(eq("message"), any(MessageEvent.class));
+    
+    parser.line("data: hello");
+    parser.line("");
+
+    verify(eventHandler).onError(err);
+  }
+  
+  @Test
+  public void errorFromHandlerOnMessageIsLogged() throws Exception {
+    Logger mockLogger = mock(Logger.class);
+    EventParser ep = new EventParser(ORIGIN, eventHandler, connectionHandler, mockLogger);
+    
+    RuntimeException err = new RuntimeException("sorry");
+    doThrow(err).when(eventHandler).onMessage(eq("message"), any(MessageEvent.class));
+    
+    ep.line("data: hello");
+    ep.line("");
+
+    verify(mockLogger).debug("Parsing line: {}", "data: hello");
+    verify(mockLogger).debug("Parsing line: {}", "");
+    verify(mockLogger).debug("Dispatching message: \"{}\", {}", "message", new MessageEvent("hello", null, ORIGIN));
+    verify(mockLogger).warn("Message handler threw an exception: " + err.toString());
+    verify(mockLogger).debug(eq("Stack trace: {}"), any(LazyStackTrace.class));
+  }
+  
+  @Test
+  public void catchesAndRedispatchesErrorFromHandlerOnComment() throws Exception {
+    RuntimeException err = new RuntimeException("sorry");
+    doThrow(err).when(eventHandler).onComment(any(String.class));
+    
+    parser.line(": comment");
+
+    verify(eventHandler).onError(err);
   }
 }

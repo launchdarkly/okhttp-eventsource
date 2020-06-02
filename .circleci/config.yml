@@ -69,7 +69,13 @@ jobs:
           steps:
             - run:
                 name: Generate test coverage report
-                command: ./gradlew jacocoTestReport
+                command: |
+                  ./gradlew jacocoTestReport
+                  mkdir -p coverage/
+                  cp -r build/reports/jacoco/test/* ./coverage
+            - run:
+                name: Enforce test coverage
+                command: ./gradlew jacocoTestCoverageVerification
       - run:
           name: Save test results
           command: |
@@ -84,7 +90,7 @@ jobs:
           condition: <<parameters.with-coverage>>
           steps:
             - store_artifacts:
-                path: build/reports/jacoco
+                path: coverage
 
   build-test-windows:
     executor:

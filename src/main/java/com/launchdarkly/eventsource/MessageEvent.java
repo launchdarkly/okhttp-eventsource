@@ -74,4 +74,9 @@ public class MessageEvent {
     result = 31 * result + (origin != null ? origin.hashCode() : 0);
     return result;
   }
+  
+  @Override
+  public String toString() {
+    return "MessageEvent(data=" + data + ",id=" + lastEventId + ",origin=" + origin + ")";
+  }
 }

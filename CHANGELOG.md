@@ -28,6 +28,10 @@ All notable changes to the LaunchDarkly EventSource implementation for Java will
 ### Removed:
 - In `EventSource`: `setHttpUrl`, `setLastEventId`, `setMaxReconnectTime`, `setReconnectionTime`, `setUri` (these can only be set in the builder).
 
+## [1.11.1] - 2020-05-26
+### Fixed:
+- Fixed a bug that could cause the randomized jitter not to be applied to reconnection delays if the reconnect interval (in milliseconds) was a power of two.
+
 ## [1.11.0] - 2020-03-30
 ### Added:
 - New `EventSource` method `restart()` allows the caller to force a stream connection retry even if no I/O error has happened, using the same backoff behavior that would be used for errors.

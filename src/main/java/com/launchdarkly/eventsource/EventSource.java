@@ -1,8 +1,5 @@
 package com.launchdarkly.eventsource;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
@@ -28,6 +25,7 @@ import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
 
+import static com.launchdarkly.eventsource.Helpers.pow2;
 import static com.launchdarkly.eventsource.ReadyState.CLOSED;
 import static com.launchdarkly.eventsource.ReadyState.CONNECTING;
 import static com.launchdarkly.eventsource.ReadyState.OPEN;
@@ -52,7 +50,7 @@ import okio.Okio;
  * aka EventSource
  */
 public class EventSource implements Closeable {
-  private final Logger logger;
+  final Logger logger; // visible for tests
 
   /**
    * The default value for {@link Builder#reconnectTime(Duration)}: 1 second.
@@ -90,11 +88,11 @@ public class EventSource implements Closeable {
   private final RequestTransformer requestTransformer;
   private final ExecutorService eventExecutor;
   private final ExecutorService streamExecutor;
-  private Duration reconnectTime;
-  private Duration maxReconnectTime;
-  private final Duration backoffResetThreshold;
+  volatile Duration reconnectTime; // visible for tests
+  final Duration maxReconnectTime; // visible for tests
+  final Duration backoffResetThreshold; // visible for tests
   private volatile String lastEventId;
-  private final EventHandler handler;
+  private final AsyncEventHandler handler;
   private final ConnectionErrorHandler connectionErrorHandler;
   private final AtomicReference<ReadyState> readyState;
   private final OkHttpClient client;
@@ -104,10 +102,14 @@ public class EventSource implements Closeable {
   private BufferedSource bufferedSource;
 
   EventSource(Builder builder) {
-    this.name = builder.name;
-    String loggerName = EventSource.class.getCanonicalName() +
-        (name == null || name.equals("") ? "" : "." + name);
-    this.logger = LoggerFactory.getLogger(loggerName);
+    this.name = builder.name == null ? "" : builder.name;
+    if (builder.logger == null) {
+      String loggerName = (builder.loggerBaseName == null ? EventSource.class.getCanonicalName() : builder.loggerBaseName) +
+          (name.isEmpty() ? "" : ("." + name));
+      this.logger = new SLF4JLogger(loggerName);
+    } else {
+      this.logger = builder.logger;
+    }
     this.url = builder.url;
     this.headers = addDefaultHeaders(builder.headers);
     this.method = builder.method;
@@ -121,7 +123,7 @@ public class EventSource implements Closeable {
     this.eventExecutor = Executors.newSingleThreadExecutor(eventsThreadFactory);
     ThreadFactory streamThreadFactory = createThreadFactory("okhttp-eventsource-stream", builder.threadPriority);
     this.streamExecutor = Executors.newSingleThreadExecutor(streamThreadFactory);
-    this.handler = new AsyncEventHandler(this.eventExecutor, builder.handler);
+    this.handler = new AsyncEventHandler(this.eventExecutor, builder.handler, logger);
     this.connectionErrorHandler = builder.connectionErrorHandler;
     this.readyState = new AtomicReference<>(RAW);
     this.client = builder.clientBuilder.build();
@@ -150,7 +152,7 @@ public class EventSource implements Closeable {
       logger.info("Start method called on this already-started EventSource object. Doing nothing");
       return;
     }
-    logger.debug("readyState change: " + RAW + " -> " + CONNECTING);
+    logger.debug("readyState change: {} -> {}", RAW, CONNECTING);
     logger.info("Starting EventSource client using URI: " + url);
     streamExecutor.execute(this::connect);
   }
@@ -169,10 +171,10 @@ public class EventSource implements Closeable {
     ReadyState previousState = readyState.getAndUpdate(t -> t == ReadyState.OPEN ? ReadyState.CLOSED : t);
     if (previousState == OPEN) {
       closeCurrentStream(previousState);
-    } else if (previousState == RAW || previousState == CONNECTING) {
+    } else if (previousState == RAW) {
       start();
     }
-    // if already shutdown or in the process of closing, do nothing
+    // if already connecting or already shutdown or in the process of closing, do nothing
   }
   
   /**
@@ -189,7 +191,7 @@ public class EventSource implements Closeable {
   @Override
   public void close() {
     ReadyState currentState = readyState.getAndSet(SHUTDOWN);
-    logger.debug("readyState change: " + currentState + " -> " + SHUTDOWN);
+    logger.debug("readyState change: {} -> {}", currentState, SHUTDOWN);
     if (currentState == SHUTDOWN) {
       return;
     }
@@ -199,26 +201,22 @@ public class EventSource implements Closeable {
     eventExecutor.shutdownNow();
     streamExecutor.shutdownNow();
 
-    if (client != null) {
-      if (client.connectionPool() != null) {
-        client.connectionPool().evictAll();
-      }
-      if (client.dispatcher() != null) {
-        client.dispatcher().cancelAll();
-        if (client.dispatcher().executorService() != null) {
-          client.dispatcher().executorService().shutdownNow();
-        }
+    // COVERAGE: these null guards are here for safety but in practice the values are never null and there
+    // is no way to cause them to be null in unit tests
+    if (client.connectionPool() != null) {
+      client.connectionPool().evictAll();
+    }
+    if (client.dispatcher() != null) {
+      client.dispatcher().cancelAll();
+      if (client.dispatcher().executorService() != null) {
+        client.dispatcher().executorService().shutdownNow();
       }
     }
   }
   
   private void closeCurrentStream(ReadyState previousState) {
     if (previousState == ReadyState.OPEN) {
-      try {
-        handler.onClosed();
-      } catch (Exception e) {
-        handler.onError(e);
-      }
+      handler.onClosed();
     }
 
     if (call != null) {
@@ -226,7 +224,7 @@ public class EventSource implements Closeable {
       // Otherwise, an IllegalArgumentException "Unbalanced enter/exit" error is thrown by okhttp.
       // https://github.com/google/ExoPlayer/issues/1348
       call.cancel();
-      logger.debug("call cancelled");
+      logger.debug("call cancelled", null);
     }
   }
   
@@ -268,7 +266,7 @@ public class EventSource implements Closeable {
         long connectedTime = -1;
 
         ReadyState currentState = readyState.getAndSet(CONNECTING);
-        logger.debug("readyState change: " + currentState + " -> " + CONNECTING);
+        logger.debug("readyState change: {} -> {}", currentState, CONNECTING);
         try {        	  
           call = client.newCall(buildRequest());
           response = call.execute();
@@ -276,26 +274,24 @@ public class EventSource implements Closeable {
             connectedTime = System.currentTimeMillis();
             currentState = readyState.getAndSet(OPEN);
             if (currentState != CONNECTING) {
+              // COVERAGE: there is no way to simulate this condition in unit tests
               logger.warn("Unexpected readyState change: " + currentState + " -> " + OPEN);
             } else {
-              logger.debug("readyState change: " + currentState + " -> " + OPEN);
+              logger.debug("readyState change: {} -> {}", currentState, OPEN);
             }
             logger.info("Connected to Event Source stream.");
-            try {
-              handler.onOpen();
-            } catch (Exception e) {
-              handler.onError(e);
-            }
+            handler.onOpen();
             if (bufferedSource != null) {
               bufferedSource.close();
             }
             bufferedSource = Okio.buffer(response.body().source());
-            EventParser parser = new EventParser(url.uri(), handler, connectionHandler);
+            EventParser parser = new EventParser(url.uri(), handler, connectionHandler, logger);
+            // COVERAGE: the isInterrupted() condition is not encountered in unit tests and it's unclear if it can ever happen
             for (String line; !Thread.currentThread().isInterrupted() && (line = bufferedSource.readUtf8LineStrict()) != null; ) {
               parser.line(line);
             }
           } else {
-            logger.debug("Unsuccessful Response: " + response);
+            logger.debug("Unsuccessful response: {}", response);
             errorHandlerAction = dispatchError(new UnsuccessfulResponseException(response.code()));
           }
         } catch (EOFException eofe) {
@@ -307,7 +303,8 @@ public class EventSource implements Closeable {
           } else if (state == CLOSED) { // this happens if it's being restarted
             errorHandlerAction = ConnectionErrorHandler.Action.PROCEED;
           } else {
-        	  	logger.debug("Connection problem.", ioe);
+            // COVERAGE: there is no way to simulate this condition in unit tests - closing the stream causes EOFException
+        	  	logger.debug("Connection problem: {}", ioe);
         	  	errorHandlerAction = dispatchError(ioe);
           }
         } finally {
@@ -319,28 +316,25 @@ public class EventSource implements Closeable {
             nextState = SHUTDOWN;
           }
           currentState = readyState.getAndSet(nextState);
-          logger.debug("readyState change: " + currentState + " -> " + nextState);
+          logger.debug("readyState change: {} -> {}", currentState, nextState);
 
           if (response != null && response.body() != null) {
             response.close();
-            logger.debug("response closed");
+            logger.debug("response closed", null);
           }
 
           if (bufferedSource != null) {
             try {
               bufferedSource.close();
-              logger.debug("buffered source closed");
+              logger.debug("buffered source closed", null);
             } catch (IOException e) {
-              logger.warn("Exception when closing bufferedSource", e);
+              // COVERAGE: there is no way to simulate this condition in unit tests
+              logger.warn("Exception when closing bufferedSource: " + e.toString());
             }
           }
 
           if (currentState == ReadyState.OPEN) {
-            try {
-              handler.onClosed();
-            } catch (Exception e) {
-              handler.onError(e);
-            }
+            handler.onClosed();
           }
 
           if (nextState != SHUTDOWN) {
@@ -354,10 +348,11 @@ public class EventSource implements Closeable {
         }
       }
     } catch (RejectedExecutionException ignored) {
+      // COVERAGE: there is no way to simulate this condition in unit tests
       call = null;
       response = null;
       bufferedSource = null;
-      logger.debug("Rejected execution exception ignored: ", ignored);
+      logger.debug("Rejected execution exception ignored: {}", ignored);
       // During shutdown, we tried to send a message to the event handler
       // Do not reconnect; the executor has been shut down
     }
@@ -383,30 +378,10 @@ public class EventSource implements Closeable {
   }
 
   Duration backoffWithJitter(int reconnectAttempts) {
-    long jitterVal = Math.min(maxReconnectTime.toMillis(), reconnectTime.toMillis() * pow2(reconnectAttempts));
-    return Duration.ofMillis(jitterVal / 2 + nextLong(jitter, jitterVal) / 2);
-  }
-
-  // Returns 2**k, or Integer.MAX_VALUE if 2**k would overflow
-  private int pow2(int k) {
-    return (k < Integer.SIZE - 1) ? (1 << k) : Integer.MAX_VALUE;
-  }
-
-  // Adapted from http://stackoverflow.com/questions/2546078/java-random-long-number-in-0-x-n-range
-  // Since ThreadLocalRandom.current().nextLong(n) requires Android 5
-  private long nextLong(Random rand, long bound) {
-    if (bound <= 0) {
-      throw new IllegalArgumentException("bound must be positive");
-    }
-
-    long r = rand.nextLong() & Long.MAX_VALUE;
-    long m = bound - 1L;
-    if ((bound & m) == 0) { // i.e., bound is a power of 2
-      r = (bound * r) >> (Long.SIZE - 1);
-    } else {
-      for (long u = r; u - (r = u % bound) + m < 0L; u = rand.nextLong() & Long.MAX_VALUE) ;
-    }
-    return r;
+    long maxTimeLong = Math.min(maxReconnectTime.toMillis(), reconnectTime.toMillis() * pow2(reconnectAttempts));
+    // 2^31 milliseconds is much longer than any reconnect time we would reasonably want to use, so we can pin this to int
+    int maxTimeInt = maxTimeLong > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int)maxTimeLong;
+    return Duration.ofMillis(maxTimeInt / 2 + jitter.nextInt(maxTimeInt) / 2);
   }
 
   private static Headers addDefaultHeaders(Headers custom) {
@@ -433,7 +408,7 @@ public class EventSource implements Closeable {
   // to stream events. From an application's point of view, these properties can only be set at
   // configuration time via the builder.
   private void setReconnectionTime(Duration reconnectionTime) {
-    this.reconnectTime = reconnectionTime == null ? DEFAULT_RECONNECT_TIME : reconnectionTime;
+    this.reconnectTime = reconnectionTime;
   }
 
   private void setLastEventId(String lastEventId) {
@@ -510,7 +485,7 @@ public class EventSource implements Closeable {
    * Builder for {@link EventSource}.
    */
   public static final class Builder {
-    private String name = "";
+    private String name;
     private Duration reconnectTime = DEFAULT_RECONNECT_TIME;
     private Duration maxReconnectTime = DEFAULT_MAX_RECONNECT_TIME;
     private Duration backoffResetThreshold = DEFAULT_BACKOFF_RESET_THRESHOLD;
@@ -526,6 +501,8 @@ public class EventSource implements Closeable {
     private RequestTransformer requestTransformer = null;
     private RequestBody body = null;
     private OkHttpClient.Builder clientBuilder;
+    private Logger logger = null;
+    private String loggerBaseName = null;
     
     /**
      * Creates a new builder.
@@ -570,6 +547,7 @@ public class EventSource implements Closeable {
         b.sslSocketFactory(new ModernTLSSocketFactory(), defaultTrustManager());
       } catch (GeneralSecurityException e) {
         // TLS is not available, so don't set up the socket factory, swallow the exception
+        // COVERAGE: There is no way to cause this to happen in unit tests
       }
       return b;
     }
@@ -579,13 +557,11 @@ public class EventSource implements Closeable {
      * <p>
      * Defaults to "GET".
      *
-     * @param method the HTTP method name
+     * @param method the HTTP method name; if null or empty, "GET" is used as the default
      * @return the builder
      */
     public Builder method(String method) {
-      if (method != null && method.length() > 0) {
-        this.method = method.toUpperCase();
-      }
+      this.method = (method != null && method.length() > 0) ? method.toUpperCase() : "GET";
       return this;
     }
 
@@ -616,14 +592,15 @@ public class EventSource implements Closeable {
     /**
      * Set the name for this EventSource client to be used when naming the logger and threadpools. This is mainly useful when
      * multiple EventSource clients exist within the same process.
+     * <p>
+     * The name only affects logging when using the default SLF4J integration; if you have specified a custom
+     * {@link #logger(Logger)}, the name will not be included in log messages unless your logger implementation adds it.
      *
      * @param name the name (without any whitespaces)
      * @return the builder
      */
     public Builder name(String name) {
-      if (name != null) {
-        this.name = name;
-      }
+      this.name = name;
       return this;
     }
 
@@ -792,9 +769,7 @@ public class EventSource implements Closeable {
      * @return the builder
      */
     public Builder connectionErrorHandler(ConnectionErrorHandler handler) {
-      if (handler != null) {
-        this.connectionErrorHandler = handler;
-      }
+      this.connectionErrorHandler = handler;
       return this;
     }
 
@@ -846,6 +821,36 @@ public class EventSource implements Closeable {
     }
     
     /**
+     * Specifies a custom logger to receive EventSource logging.
+     * <p>
+     * If you do not provide a logger, the default is to send log output to SLF4J.
+     * 
+     * @param logger a {@link Logger} implementation, or null to use the default (SLF4J)
+     * @return the builder
+     * @since 2.3.0
+     */
+    public Builder logger(Logger logger) {
+      this.logger = logger;
+      return this;
+    }
+
+    /**
+     * Specifies the base logger name to use for SLF4J logging.
+     * <p>
+     * The default is {@code com.launchdarkly.eventsource.EventSource}, plus any name suffix specified
+     * by {@link #name(String)}. If you instead use {@link #logger(Logger)} to specify some other log
+     * destination rather than SLF4J, this name is unused.
+     * 
+     * @param loggerBaseName the SLF4J logger name, or null to use the default
+     * @return the builder
+     * @since 2.3.0
+     */
+    public Builder loggerBaseName(String loggerBaseName) {
+      this.loggerBaseName = loggerBaseName;
+      return this;
+    }
+    
+    /**
      * Constructs an {@link EventSource} using the builder's current properties.
      * @return the new EventSource instance
      */
@@ -871,6 +876,7 @@ public class EventSource implements Closeable {
       trustManagerFactory.init((KeyStore) null);
       TrustManager[] trustManagers = trustManagerFactory.getTrustManagers();
       if (trustManagers.length != 1 || !(trustManagers[0] instanceof X509TrustManager)) {
+        // COVERAGE: There is no way to cause this to happen in unit tests
         throw new IllegalStateException("Unexpected default trust managers:"
                 + Arrays.toString(trustManagers));
       }

@@ -12,16 +12,20 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
+import static com.launchdarkly.eventsource.EventSource.DEFAULT_BACKOFF_RESET_THRESHOLD;
 import static com.launchdarkly.eventsource.EventSource.DEFAULT_CONNECT_TIMEOUT;
 import static com.launchdarkly.eventsource.EventSource.DEFAULT_MAX_RECONNECT_TIME;
 import static com.launchdarkly.eventsource.EventSource.DEFAULT_READ_TIMEOUT;
+import static com.launchdarkly.eventsource.EventSource.DEFAULT_RECONNECT_TIME;
 import static com.launchdarkly.eventsource.EventSource.DEFAULT_WRITE_TIMEOUT;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.mockito.Mockito.mock;
 
+import okhttp3.Authenticator;
 import okhttp3.Headers;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
@@ -88,6 +92,40 @@ public class EventSourceBuilderTest {
   }
   
   @Test
+  public void defaultReconnectProperties() {
+    try (EventSource es = builder.build()) {
+      assertEquals(DEFAULT_RECONNECT_TIME, es.reconnectTime);
+      assertEquals(DEFAULT_MAX_RECONNECT_TIME, es.maxReconnectTime);
+      assertEquals(DEFAULT_BACKOFF_RESET_THRESHOLD, es.backoffResetThreshold);
+    }
+
+    builder.reconnectTime(Duration.ofSeconds(3))
+      .maxReconnectTime(Duration.ofSeconds(4))
+      .backoffResetThreshold(Duration.ofSeconds(5));
+    builder.reconnectTime(null)
+      .maxReconnectTime(null)
+      .backoffResetThreshold(null);
+
+    try (EventSource es = builder.build()) {
+      assertEquals(DEFAULT_RECONNECT_TIME, es.reconnectTime);
+      assertEquals(DEFAULT_MAX_RECONNECT_TIME, es.maxReconnectTime);
+      assertEquals(DEFAULT_BACKOFF_RESET_THRESHOLD, es.backoffResetThreshold);
+    }
+  }
+  
+  @Test
+  public void customReconnectProperties() {
+    builder.reconnectTime(Duration.ofSeconds(3))
+      .maxReconnectTime(Duration.ofSeconds(4))
+      .backoffResetThreshold(Duration.ofSeconds(5));
+    try (EventSource es = builder.build()) {
+      assertEquals(Duration.ofSeconds(3), es.reconnectTime);
+      assertEquals(Duration.ofSeconds(4), es.maxReconnectTime);
+      assertEquals(Duration.ofSeconds(5), es.backoffResetThreshold);
+    }
+  }
+  
+  @Test
   public void respectsDefaultMaximumBackoffTime() {
     builder.reconnectTime(DEFAULT_MAX_RECONNECT_TIME.minus(Duration.ofMillis(1)));
     try (EventSource es = builder.build()) {
@@ -142,6 +180,19 @@ public class EventSourceBuilderTest {
   }
 
   @Test
+  public void proxyAuthenticator() {
+    Proxy proxy = mock(java.net.Proxy.class);
+    Authenticator auth = mock(Authenticator.class);
+    builder.proxy(proxy);
+    builder.proxyAuthenticator(auth);
+    builder.build();
+    OkHttpClient client = builder.getClientBuilder().build();
+
+    assertEquals(proxy, client.proxy());
+    assertSame(auth, client.proxyAuthenticator());
+  }
+
+  @Test
   public void defaultClientWithCustomTimeouts() {
     int connectTimeout = 100;
     int readTimeout = 1000;
@@ -155,6 +206,15 @@ public class EventSourceBuilderTest {
     assertEquals(connectTimeout, client.connectTimeoutMillis());
     assertEquals(readTimeout, client.readTimeoutMillis());
     assertEquals(writeTimeout, client.writeTimeoutMillis());
+    
+    builder.connectTimeout(null);
+    assertEquals(EventSource.DEFAULT_CONNECT_TIMEOUT.toMillis(), builder.getClientBuilder().build().connectTimeoutMillis());
+    
+    builder.readTimeout(null);
+    assertEquals(EventSource.DEFAULT_READ_TIMEOUT.toMillis(), builder.getClientBuilder().build().readTimeoutMillis());
+    
+    builder.writeTimeout(null);
+    assertEquals(EventSource.DEFAULT_WRITE_TIMEOUT.toMillis(), builder.getClientBuilder().build().writeTimeoutMillis());
   }
 
   @Test
@@ -196,6 +256,17 @@ public class EventSourceBuilderTest {
     assertEquals("GET", req.method());
     assertEquals(null, req.body());
   }
+
+  @Test
+  public void nullOrEmptyMethodUsesDefault() {
+    builder.method("REPORT").method(null);
+    Request req1 = builder.build().buildRequest();
+    assertEquals("GET", req1.method());
+
+    builder.method("REPORT").method("");
+    Request req2 = builder.build().buildRequest();
+    assertEquals("GET", req2.method());
+  }
   
   @Test
   public void customHeaders() throws IOException {
@@ -205,10 +276,10 @@ public class EventSourceBuilderTest {
         .build();
     builder.headers(headers);
     Request req = builder.build().buildRequest();
-    assertEquals(Arrays.<String>asList("value1", "value2"), req.headers().values("header1"));
-    assertEquals(Arrays.<String>asList("value1"), req.headers().values("header2"));
-    assertEquals(Arrays.<String>asList("text/event-stream"), req.headers().values("Accept"));
-    assertEquals(Arrays.<String>asList("no-cache"), req.headers().values("Cache-Control"));
+    assertEquals(Arrays.asList("value1", "value2"), req.headers().values("header1"));
+    assertEquals(Arrays.asList("value1"), req.headers().values("header2"));
+    assertEquals(Arrays.asList("text/event-stream"), req.headers().values("Accept"));
+    assertEquals(Arrays.asList("no-cache"), req.headers().values("Cache-Control"));
   }
   
   @Test
@@ -219,7 +290,71 @@ public class EventSourceBuilderTest {
         .build();
     builder.headers(headers);
     Request req = builder.build().buildRequest();
-    assertEquals(Arrays.<String>asList("text/plain"), req.headers().values("Accept"));
-    assertEquals(Arrays.<String>asList("value1"), req.headers().values("header2"));
+    assertEquals(Arrays.asList("text/plain"), req.headers().values("Accept"));
+    assertEquals(Arrays.asList("value1"), req.headers().values("header2"));
+  }
+
+  @Test
+  public void customRequestTransformer() throws IOException {
+    builder.requestTransformer(req -> {
+      return new Request.Builder(req).addHeader("special", "value").build();
+    });
+    Request req = builder.build().buildRequest();
+    assertEquals(Arrays.asList("value"), req.headers().values("special"));
+  }
+  
+  @Test
+  public void customClient() throws IOException {
+    OkHttpClient client0 = new OkHttpClient.Builder().connectTimeout(Duration.ofSeconds(11)).build();
+    OkHttpClient client1 = builder.client(client0).getClientBuilder().build();
+    assertEquals(client0.connectTimeoutMillis(), client1.connectTimeoutMillis());
+  }
+  
+  @Test
+  public void defaultLoggerWithDefaultLoggerName() {
+    try (EventSource es = builder.build()) {
+      assertEquals(SLF4JLogger.class, es.logger.getClass());
+      assertEquals("com.launchdarkly.eventsource.EventSource", ((SLF4JLogger)es.logger).name);
+    }
+  }
+
+  @Test
+  public void defaultLoggerWithDefaultLoggerNamePlusCustomStreamName() {
+    try (EventSource es = builder.name("mystream").build()) {
+      assertEquals(SLF4JLogger.class, es.logger.getClass());
+      assertEquals("com.launchdarkly.eventsource.EventSource.mystream", ((SLF4JLogger)es.logger).name);
+    }
+  }
+
+  @Test
+  public void customStreamNameIsIgnoredInLoggerName() {
+    try (EventSource es = builder.name("").build()) {
+      assertEquals(SLF4JLogger.class, es.logger.getClass());
+      assertEquals("com.launchdarkly.eventsource.EventSource", ((SLF4JLogger)es.logger).name);
+    }
+  }
+
+  @Test
+  public void defaultLoggerWithCustomLoggerName() {
+    try (EventSource es = builder.loggerBaseName("mylog").build()) {
+      assertEquals(SLF4JLogger.class, es.logger.getClass());
+      assertEquals("mylog", ((SLF4JLogger)es.logger).name);
+    }
+  }
+
+  @Test
+  public void defaultLoggerWithCustomLoggerNamePlusCustomStreamName() {
+    try (EventSource es = builder.loggerBaseName("mylog").name("mystream").build()) {
+      assertEquals(SLF4JLogger.class, es.logger.getClass());
+      assertEquals("mylog.mystream", ((SLF4JLogger)es.logger).name);
+    }
+  }
+
+  @Test
+  public void customLogger() {
+    Logger myLogger = new SLF4JLogger("x");
+    try (EventSource es = builder.logger(myLogger).build()) {
+      assertSame(myLogger, es.logger);
+    }
   }
 }

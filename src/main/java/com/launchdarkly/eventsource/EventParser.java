@@ -1,8 +1,5 @@
 package com.launchdarkly.eventsource;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.net.URI;
 import java.time.Duration;
 import java.util.regex.Pattern;
@@ -11,7 +8,6 @@ import java.util.regex.Pattern;
  * Adapted from https://github.com/aslakhellesoy/eventsource-java/blob/master/src/main/java/com/github/eventsource/client/impl/EventStreamParser.java
  */
 public class EventParser {
-  private static final Logger logger = LoggerFactory.getLogger(EventParser.class);
   private static final String DATA = "data";
   private static final String ID = "id";
   private static final String EVENT = "event";
@@ -23,16 +19,18 @@ public class EventParser {
 
   private final EventHandler handler;
   private final ConnectionHandler connectionHandler;
+  private final Logger logger;
   private final URI origin;
 
   private StringBuffer data = new StringBuffer();
   private String lastEventId;
   private String eventName = DEFAULT_EVENT;
 
-  EventParser(URI origin, EventHandler handler, ConnectionHandler connectionHandler) {
+  EventParser(URI origin, EventHandler handler, ConnectionHandler connectionHandler, Logger logger) {
     this.handler = handler;
     this.origin = origin;
     this.connectionHandler = connectionHandler;
+    this.logger = logger;
   }
 
   /**
@@ -41,7 +39,7 @@ public class EventParser {
    * @param line an input line
    */
   public void line(String line) {
-    logger.debug("Parsing line: " + line);
+    logger.debug("Parsing line: {}", line);
     int colonIndex;
     if (line.trim().isEmpty()) {
       dispatchEvent();
@@ -94,8 +92,11 @@ public class EventParser {
     MessageEvent message = new MessageEvent(dataString, lastEventId, origin);
     connectionHandler.setLastEventId(lastEventId);
     try {
+      logger.debug("Dispatching message: \"{}\", {}", eventName, message);
       handler.onMessage(eventName, message);
     } catch (Exception e) {
+      logger.warn("Message handler threw an exception: " + e.toString());
+      logger.debug("Stack trace: {}", new LazyStackTrace(e));
       handler.onError(e);
     }
     data = new StringBuffer();

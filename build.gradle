@@ -9,6 +9,8 @@ buildscript {
 plugins {
     id "java"
     id "java-library"
+    id "checkstyle"
+    id "jacoco"
     id "signing"
     id "maven-publish"
     id "de.marcphilipp.nexus-publish" version "0.4.0"
@@ -33,8 +35,8 @@ allprojects {
 }
 
 ext.versions = [
-	"okhttp": "4.5.0",
-	"slf4j": "1.7.22"
+    "okhttp": "4.5.0",
+    "slf4j": "1.7.22"
 ]
 
 dependencies {
@@ -45,6 +47,10 @@ dependencies {
     testImplementation "org.eclipse.jetty:jetty-server:9.4.27.v20200227"
     testImplementation "junit:junit:4.12"
     testImplementation "org.hamcrest:hamcrest-all:1.3" 
+}
+
+checkstyle {
+    configFile file("${project.rootDir}/checkstyle.xml")
 }
 
 jar {
@@ -79,6 +85,62 @@ test {
         events "passed", "skipped", "failed", "standardOut", "standardError"
         showStandardStreams = true
         exceptionFormat = 'full'
+    }
+}
+
+jacocoTestReport { // code coverage report
+    reports {
+        xml.enabled
+        csv.enabled true
+        html.enabled true
+    }
+}
+
+jacocoTestCoverageVerification {
+    // See notes in CONTRIBUTING.md on code coverage. Unfortunately we can't configure line-by-line code
+    // coverage overrides within the source code itself, because Jacoco operates on bytecode.
+    violationRules { rules ->
+        def knownMissedLinesForMethods = [
+            // The key for each of these items is the complete method signature minus the "com.launchdarkly.eventsource." prefix.
+            "EventSource.connect()": 12,
+            "EventSource.Builder.createInitialClientBuilder()": 1,
+            "EventSource.Builder.defaultTrustManager()": 2,
+            "SLF4JLogger.error(java.lang.String)": 2,
+            "ModernTLSSocketFactory.createSocket(java.lang.String, int)": 1,
+            "ModernTLSSocketFactory.createSocket(java.lang.String, int, java.net.InetAddress, int)": 1,
+            "ModernTLSSocketFactory.createSocket(java.net.InetAddress, int)": 1,
+            "ModernTLSSocketFactory.createSocket(java.net.InetAddress, int, java.net.InetAddress, int)": 1,
+            "ModernTLSSocketFactory.createSocket(java.net.Socket, java.lang.String, int, boolean)": 1,
+            "ModernTLSSocketFactory.getDefaultCipherSuites()": 1,
+            "ModernTLSSocketFactory.getSupportedCipherSuites()": 1
+        ]
+        
+        knownMissedLinesForMethods.each { partialSignature, maxMissedLines ->
+            if (maxMissedLines > 0) {  // < 0 means skip entire method
+                rules.rule {
+                    element = "METHOD"
+                    includes = [ "com.launchdarkly.eventsource." + partialSignature ]
+                    limit {
+                        counter = "LINE"
+                        value = "MISSEDCOUNT"
+                        maximum = maxMissedLines
+                    }
+                }
+            }
+        }
+        
+        // General rule that we should expect 100% test coverage; exclude any methods that have overrides above
+        rule {
+            element = "METHOD"
+            limit {
+                counter = "LINE"
+                value = "MISSEDCOUNT"
+                maximum = 0
+            }
+            excludes = knownMissedLinesForMethods.collect { partialSignature, maxMissedLines ->
+                "com.launchdarkly.eventsource." + partialSignature
+            }
+        }
     }
 }
 

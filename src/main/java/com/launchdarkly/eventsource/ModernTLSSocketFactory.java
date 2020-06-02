@@ -29,6 +29,9 @@ public class ModernTLSSocketFactory extends SSLSocketFactory {
     this.defaultSocketFactory = context.getSocketFactory();
   }
 
+  // COVERAGE: none of the following methods are exercised by the unit tests currently, because our
+  // test support code is not able to run an embedded secure server with a self-signed certificate.
+  
   @Override
   public String[] getDefaultCipherSuites() {
     return this.defaultSocketFactory.getDefaultCipherSuites();

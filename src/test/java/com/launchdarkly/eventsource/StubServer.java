@@ -32,7 +32,7 @@ import okhttp3.Headers;
  * disconnected.
  */
 @SuppressWarnings("javadoc")
-public final class StubServer implements Closeable {
+public final class StubServer implements Closeable {  
   private final Server server;
   private final BlockingQueue<RequestInfo> requests = new LinkedBlockingQueue<>();
   
@@ -208,6 +208,15 @@ public final class StubServer implements Closeable {
    */
   public static abstract class Handlers {
     /**
+     * Special value to use with {@link #stream(String, BlockingQueue)} to signal that the stream should be
+     * closed at this point, rather than waiting for more chunks.
+     * <p>
+     * The value of this constant is unimportant, we check for reference equality so what matters is that
+     * you use this specific String.
+     */
+    public static final String CLOSE_STREAM = new String("**EOF**");
+
+    /**
      * Provides a handler that returns the specified HTTP status, with no content.
      * 
      * @param status the status code
@@ -309,26 +318,15 @@ public final class StubServer implements Closeable {
     }
     
     /**
-     * Interface for use with {@link Handlers#stream(String, StreamProducer)}.
-     */
-    public static interface StreamProducer {
-      /**
-       * Pushes chunks of response data onto a queue. Another worker thread will dequeue and send the chunks.
-       * 
-       * @param chunks the queue for chunks of stream data
-       * @return true if the stream should be left open indefinitely afterward, false to close it
-       */
-      boolean writeStream(BlockingQueue<String> chunks);
-    }
-
-    /**
-     * Provides a handler that streams a chunked response.
+     * Provides a handler that streams a chunked response. It will continue waiting for more chunks
+     * to be pushed onto the queue unless you push the special constant {@link #CLOSE_STREAM}, which
+     * signals the end of the response.
      * 
      * @param contentType value for the Content-Type header
      * @param streamProducer a {@link StreamProducer} that will provide the response
      * @return the handler
      */
-    public static Handler stream(final String contentType, final StreamProducer streamProducer) {
+    public static Handler stream(final String contentType, final BlockingQueue<String> chunks) {
       return new Handler() {
         public void handle(HttpServletRequest req, HttpServletResponse resp) {
           resp.setStatus(200);
@@ -337,28 +335,10 @@ public final class StubServer implements Closeable {
           try {
             resp.flushBuffer();
             PrintWriter w = resp.getWriter();
-            final BlockingQueue<String> chunks = new LinkedBlockingQueue<>();
-            final String terminator = "***EOF***"; // value doesn't matter, we're checking for reference equality
-            Thread producerThread = new Thread(new Runnable() {
-              public void run() {
-                boolean leaveOpen = streamProducer.writeStream(chunks);
-                if (leaveOpen) {
-                  while (true) {
-                    try {
-                      Thread.sleep(1000);
-                    } catch (InterruptedException e) {
-                      break;
-                    }
-                  }
-                }
-                chunks.add(terminator);
-              }
-            });
-            producerThread.start();
             while (true) {
               try {
                 String chunk = chunks.take();
-                if (chunk == terminator) {
+                if (chunk == CLOSE_STREAM) {
                   break;
                 }
                 w.write(chunk);
@@ -367,51 +347,70 @@ public final class StubServer implements Closeable {
                 break;
               }
             }
-            producerThread.interrupt();
           } catch (IOException e) {
             throw new RuntimeException(e);
           }
         };
       };
     }
-    
+
     /**
-     * Provides content for {@link #stream(String, StreamProducer)} that is a single chunk of data.
+     * Provides content for {@link #stream(String, BlockingQueue)} that is a single chunk of data.
      * 
      * @param body the response body
      * @param leaveOpen true to leave the stream open after sending this data, false to close it
-     * @return the stream producer
+     * @return a stream chunk queue
      */
-    public static StreamProducer streamProducerFromString(final String body, final boolean leaveOpen) {
-      return streamProducerFromChunkedString(body, body.length(), Duration.ZERO, leaveOpen);
+    public static BlockingQueue<String> chunkFromString(final String body, final boolean leaveOpen) {
+      BlockingQueue<String> ret = new LinkedBlockingQueue<>();
+      ret.add(body);
+      if (!leaveOpen) {
+        ret.add(CLOSE_STREAM);
+      }
+      return ret;
     }
-
+    
     /**
-     * Provides content for {@link #stream(String, StreamProducer)} that is a string broken up into
+     * Provides content for {@link #stream(String, BlockingQueue)} that is a string broken up into
      * multiple chunks of equal size.
      * 
      * @param body the response body
      * @param chunkSize the number of characters per chunk
-     * @param chunkDelay how long to wait between chunks
+     * @param chunkDelay optional delay between chunks
      * @param leaveOpen true to leave the stream open after sending this data, false to close it
-     * @return the stream producer
+     * @return a stream chunk queue
      */
-    public static StreamProducer streamProducerFromChunkedString(final String body, final int chunkSize,
+    public static BlockingQueue<String> chunksFromString(final String body, final int chunkSize,
         final Duration chunkDelay, final boolean leaveOpen) {
-      return new StreamProducer() {
-        public boolean writeStream(BlockingQueue<String> chunks) {
-          for (int p = 0; p < body.length(); p += chunkSize) {
-            String chunk = body.substring(p, Math.min(p + chunkSize, body.length()));
-            chunks.add(chunk);
+      final BlockingQueue<String> ret = new LinkedBlockingQueue<>();
+      final String[] chunks = new String[(body.length() + chunkSize - 1) / chunkSize];
+      for (int i = 0; i < chunks.length; i++) {
+        int p = i * chunkSize;
+        chunks[i] = body.substring(p, Math.min(body.length(), p + chunkSize));
+      }
+      if (chunkDelay.isZero() || chunkDelay.isNegative()) {
+        for (int i = 0; i < chunks.length; i++) {
+          ret.add(chunks[i]);
+        }
+        if (!leaveOpen) {
+          ret.add(CLOSE_STREAM);
+        }
+      } else {
+        new Thread(() -> {
+          for (int i = 0; i < chunks.length; i++) {
+            ret.add(chunks[i]);
             try {
               Thread.sleep(chunkDelay.toMillis());
             } catch (InterruptedException e) {
               break;
             }
           }
-          return leaveOpen;
-        }
-      };
+          if (!leaveOpen) {
+            ret.add(CLOSE_STREAM);
+          }
+        }).start();
+      }
+      return ret;
     }
   }
 }

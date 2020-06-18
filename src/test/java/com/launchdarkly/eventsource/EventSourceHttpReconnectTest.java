@@ -6,13 +6,16 @@ import com.launchdarkly.eventsource.Stubs.TestHandler;
 import org.junit.Rule;
 import org.junit.Test;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import static com.launchdarkly.eventsource.StubServer.Handlers.chunkFromString;
 import static com.launchdarkly.eventsource.StubServer.Handlers.forRequestsInSequence;
 import static com.launchdarkly.eventsource.StubServer.Handlers.interruptible;
+import static com.launchdarkly.eventsource.StubServer.Handlers.ioError;
 import static com.launchdarkly.eventsource.StubServer.Handlers.returnStatus;
 import static com.launchdarkly.eventsource.StubServer.Handlers.stream;
 import static org.junit.Assert.assertEquals;
@@ -28,13 +31,21 @@ public class EventSourceHttpReconnectTest {
   
   @Rule public TestScopedLoggerRule testLogger = new TestScopedLoggerRule();
 
-  // NOTE ABOUT KNOWN ISSUE: Intermittent test failures suggest that sometimes the handler's onClose()
-  // method does not get called when the stream is completely shut down. This is not a new issue, and
-  // it does not affect the way the LaunchDarkly SDKs use EventSource. So, for now, test assertions
-  // for that method are commented out.
-  
   @Test
   public void eventSourceReconnectsAfterSocketClosed() throws Exception {
+    verifyReconnectAfterStreamInterrupted(
+        null,
+        Duration.ofMillis(10),
+        eventSink -> {
+          assertEquals(LogItem.closed(), eventSink.awaitLogItem());
+        });
+  }
+  
+  private void verifyReconnectAfterStreamInterrupted(
+      StubServer.Handler extraErrorAfterReconnectHandler,
+      Duration reconnectTime,
+      Consumer<TestHandler> checkExpectedEvents
+      ) {
     String body1 = "data: first\n\n";
     String body2 = "data: second\n\n";
 
@@ -42,11 +53,16 @@ public class EventSourceHttpReconnectTest {
     
     StubServer.InterruptibleHandler streamHandler1 = interruptible(stream(CONTENT_TYPE, chunkFromString(body1, true)));
     StubServer.Handler streamHandler2 = stream(CONTENT_TYPE, chunkFromString(body2, true));
-    StubServer.Handler allRequests = forRequestsInSequence(streamHandler1, streamHandler2);
+    StubServer.Handler allRequests;
+    if (extraErrorAfterReconnectHandler == null) {
+      allRequests = forRequestsInSequence(streamHandler1, streamHandler2);
+    } else {
+      allRequests = forRequestsInSequence(streamHandler1, extraErrorAfterReconnectHandler, streamHandler2);
+    }
         
     try (StubServer server = StubServer.start(allRequests)) {      
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
-          .reconnectTime(Duration.ofMillis(10))
+          .reconnectTime(reconnectTime)
           .build()) {
         es.start();
         
@@ -58,8 +74,8 @@ public class EventSourceHttpReconnectTest {
         eventSink.assertNoMoreLogItems(); // should not have closed first stream yet
         
         streamHandler1.interrupt();
-
-        assertEquals(LogItem.closed(), eventSink.awaitLogItem());
+        
+        checkExpectedEvents.accept(eventSink);
        
         assertEquals(LogItem.opened(), eventSink.awaitLogItem());
 
@@ -67,32 +83,55 @@ public class EventSourceHttpReconnectTest {
             eventSink.awaitLogItem());
       }
       
-      // assertEquals(LogItem.closed(), eventSink.awaitLogItem()); // see NOTE ON KNOWN ISSUE
-      // eventSink.assertNoMoreLogItems();
+      assertEquals(LogItem.closed(), eventSink.awaitLogItem());
+      eventSink.assertNoMoreLogItems();
     }
   }
 
   @Test
-  public void eventSourceReconnectsAfterErrorOnFirstRequest() throws Exception {
+  public void eventSourceReconnectsAfterHttpErrorOnFirstRequest() throws Exception {
+    verifyReconnectAfterErrorOnFirstRequest(
+        returnStatus(500),
+        Duration.ofMillis(10),
+        eventSink -> {
+          LogItem errorItem = eventSink.awaitLogItem();
+          assertEquals(LogItem.error(new UnsuccessfulResponseException(500)), errorItem);
+          assertEquals(500, ((UnsuccessfulResponseException)errorItem.error).getCode());
+        });
+  }
+
+  @Test
+  public void eventSourceReconnectsAfterNetworkErrorOnFirstRequest() throws Exception {
+    verifyReconnectAfterErrorOnFirstRequest(
+        ioError(),
+        Duration.ofMillis(10),
+        eventSink -> {
+          LogItem errorItem = eventSink.awaitLogItem();
+          assertEquals(IOException.class, errorItem.error.getClass());
+        });
+  }
+
+  private void verifyReconnectAfterErrorOnFirstRequest(
+      StubServer.Handler errorProducer,
+      Duration reconnectTime,
+      Consumer<TestHandler> checkExpectedEvents
+      ) {
     String body = "data: good\n\n";
-    int statusCode = 500;
 
     TestHandler eventSink = new TestHandler();
-
-    StubServer.Handler streamHandler = stream(CONTENT_TYPE, chunkFromString(body, true));
-    StubServer.Handler allRequests = forRequestsInSequence(returnStatus(statusCode), streamHandler);
     
-    try (StubServer server = StubServer.start(allRequests)) {            
+    StubServer.Handler streamHandler = stream(CONTENT_TYPE, chunkFromString(body, true));
+    StubServer.Handler allRequests = forRequestsInSequence(errorProducer, streamHandler);
+ 
+    try (StubServer server = StubServer.start(allRequests)) { 
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
-          .reconnectTime(Duration.ofMillis(10))
+          .reconnectTime(reconnectTime)
           .logger(testLogger.getLogger())
           .build()) {
         es.start();
-       
-        LogItem errorItem = eventSink.awaitLogItem();
-        assertEquals(LogItem.error(new UnsuccessfulResponseException(500)), errorItem);
-        assertEquals(statusCode, ((UnsuccessfulResponseException)errorItem.error).getCode());
-        
+
+        checkExpectedEvents.accept(eventSink);
+ 
         assertEquals(LogItem.opened(), eventSink.awaitLogItem());
         
         assertEquals(LogItem.event("message", "good"),
@@ -101,52 +140,41 @@ public class EventSourceHttpReconnectTest {
         eventSink.assertNoMoreLogItems();
       }
       
-      // assertEquals(LogItem.closed(), eventSink.awaitLogItem()); // see NOTE ON KNOWN ISSUE
+      assertEquals(LogItem.closed(), eventSink.awaitLogItem());
+      eventSink.assertNoMoreLogItems();
     }
   }
 
   @Test
   public void eventSourceReconnectsAgainAfterErrorOnFirstReconnect() throws Exception {
-    String body1 = "data: first\n\n";
-    String body2 = "data: second\n\n";
+    verifyReconnectAfterStreamInterrupted(
+        returnStatus(500),
+        Duration.ofMillis(10),
+        eventSink -> {
+          assertEquals(LogItem.closed(), eventSink.awaitLogItem());
+          assertEquals(LogItem.error(new UnsuccessfulResponseException(500)),
+              eventSink.awaitLogItem());
+        });
+  }
 
-    TestHandler eventSink = new TestHandler();
+  @Test
+  public void eventSourceReconnectsEvenIfDelayIsZero() throws Exception {
+    verifyReconnectAfterStreamInterrupted(
+        null,
+        Duration.ZERO,
+        eventSink -> {
+          assertEquals(LogItem.closed(), eventSink.awaitLogItem());
+        });
+  }
 
-    StubServer.InterruptibleHandler streamHandler1 = interruptible(stream(CONTENT_TYPE, chunkFromString(body1, true)));
-    StubServer.Handler streamHandler2 = stream(CONTENT_TYPE, chunkFromString(body2, true));
-    StubServer.Handler allRequests = forRequestsInSequence(streamHandler1, returnStatus(500), streamHandler2);
-    
-    try (StubServer server = StubServer.start(allRequests)) {            
-      try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
-          .reconnectTime(Duration.ofMillis(10))
-          .logger(testLogger.getLogger())
-          .build()) {
-        es.start();
-       
-        assertEquals(LogItem.opened(), eventSink.awaitLogItem());
-        
-        assertEquals(LogItem.event("message", "first"),
-            eventSink.awaitLogItem());
-        
-        eventSink.assertNoMoreLogItems();
- 
-        streamHandler1.interrupt(); // make first stream fail
-        
-        assertEquals(LogItem.closed(), eventSink.awaitLogItem());
-        
-        assertEquals(LogItem.error(new UnsuccessfulResponseException(500)),
-            eventSink.awaitLogItem());
-        
-        assertEquals(LogItem.opened(), eventSink.awaitLogItem());
-        
-        assertEquals(LogItem.event("message", "second"),
-            eventSink.awaitLogItem());
-        
-        eventSink.assertNoMoreLogItems();
-      }
-      
-      // assertEquals(LogItem.closed(), eventSink.awaitLogItem()); // see NOTE ON KNOWN ISSUE
-    }
+  @Test
+  public void eventSourceReconnectsEvenIfDelayIsNegative() throws Exception {
+    verifyReconnectAfterStreamInterrupted(
+        null,
+        Duration.ofMillis(-1),
+        eventSink -> {
+          assertEquals(LogItem.closed(), eventSink.awaitLogItem());
+        });
   }
 
   @Test
@@ -157,7 +185,7 @@ public class EventSourceHttpReconnectTest {
     ConnectionErrorHandler connectionErrorHandler = new ConnectionErrorHandler() {
       public Action onConnectionError(Throwable t) {
         calledHandler.set(true);
-        receivedError.set(t);
+        receivedError.compareAndSet(null, t);
         return Action.SHUTDOWN;
       }
     };
@@ -223,7 +251,7 @@ public class EventSourceHttpReconnectTest {
         eventSink.assertNoMoreLogItems();
       }
       
-      // assertEquals(LogItem.closed(), eventSink.awaitLogItem()); // see NOTE ON KNOWN ISSUE
+       assertEquals(LogItem.closed(), eventSink.awaitLogItem());
     }
   }
 }

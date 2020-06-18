@@ -8,6 +8,7 @@ import org.junit.Test;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
@@ -19,6 +20,7 @@ import static com.launchdarkly.eventsource.StubServer.Handlers.stream;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.fail;
 
 import okhttp3.Headers;
 import okhttp3.MediaType;
@@ -33,11 +35,6 @@ public class EventSourceHttpTest {
   
   @Rule public TestScopedLoggerRule testLogger = new TestScopedLoggerRule();
 
-  // NOTE ABOUT KNOWN ISSUE: Intermittent test failures suggest that sometimes the handler's onClose()
-  // method does not get called when the stream is completely shut down. This is not a new issue, and
-  // it does not affect the way the LaunchDarkly SDKs use EventSource. So, for now, test assertions
-  // for that method are commented out.
-  
   @Test
   public void eventSourceSetsRequestProperties() throws Exception {
     String requestPath = "/some/path";
@@ -293,17 +290,19 @@ public class EventSourceHttpTest {
         eventSink.assertNoMoreLogItems();
       }
     }
-    // assertEquals(LogItem.closed(), eventSink.awaitLogItem()); // see NOTE ON KNOWN ISSUE
+    
+    assertEquals(LogItem.closed(), eventSink.awaitLogItem());
   }
   
   @Test
   public void defaultThreadPriorityIsNotMaximum() throws Exception {
-    StubServer.Handler streamHandler = stream(CONTENT_TYPE, chunkFromString("", false));
+    StubServer.Handler streamHandler = stream(CONTENT_TYPE, chunkFromString("", true));
     
     ThreadCapturingHandler threadCapturingHandler = new ThreadCapturingHandler();
     
     try (StubServer server = StubServer.start(streamHandler)) {
       try (EventSource es = new EventSource.Builder(threadCapturingHandler, server.getUri())
+          .logger(testLogger.getLogger())
           .build()) {
         es.start();
         
@@ -316,13 +315,14 @@ public class EventSourceHttpTest {
   
   @Test
   public void canSetSpecificThreadPriority() throws Exception {
-    StubServer.Handler streamHandler = stream(CONTENT_TYPE, chunkFromString("", false));
+    StubServer.Handler streamHandler = stream(CONTENT_TYPE, chunkFromString("", true));
     
     ThreadCapturingHandler threadCapturingHandler = new ThreadCapturingHandler();
     
     try (StubServer server = StubServer.start(streamHandler)) {
       try (EventSource es = new EventSource.Builder(threadCapturingHandler, server.getUri())
           .threadPriority(Thread.MAX_PRIORITY)
+          .logger(testLogger.getLogger())
           .build()) {
         es.start();
         
@@ -331,6 +331,77 @@ public class EventSourceHttpTest {
         assertEquals(Thread.MAX_PRIORITY, handlerThread.getPriority());
       }
     }
+  }
+  
+  @Test
+  public void threadsAreStoppedAfterExplicitShutdown() throws Exception {
+    String name = "MyTestSource";
+    TestHandler eventSink = new TestHandler(testLogger.getLogger());
+    StubServer.Handler streamHandler = stream(CONTENT_TYPE, chunkFromString("", true));
+    
+    try (StubServer server = StubServer.start(streamHandler)) {
+      try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
+          .name(name)
+          .logger(testLogger.getLogger())
+          .build()) {
+        es.start();
+        
+        assertNumberOfThreadsWithSubstring(name, 2, Duration.ofSeconds(2));
+
+        es.close();
+        
+        assertNumberOfThreadsWithSubstring(name, 0, Duration.ofSeconds(2));
+      }
+    }
+  }
+
+  @Test
+  public void threadsAreStoppedAfterShutdownIsForcedByConnectionErrorHandler() throws Exception {
+    String name = "MyTestSource";
+    TestHandler eventSink = new TestHandler(testLogger.getLogger());
+    ConnectionErrorHandler errorHandler = e -> ConnectionErrorHandler.Action.SHUTDOWN;
+    StubServer.InterruptibleHandler streamHandler = interruptible(stream(CONTENT_TYPE, chunkFromString("", true)));
+    
+    try (StubServer server = StubServer.start(streamHandler)) {
+      try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
+          .name(name)
+          .connectionErrorHandler(errorHandler)
+          .logger(testLogger.getLogger())
+          .build()) {
+        es.start();
+        
+        assertEquals(LogItem.opened(), eventSink.awaitLogItem());
+        
+        assertNumberOfThreadsWithSubstring(name, 2, Duration.ofSeconds(2));
+
+        streamHandler.interrupt();
+        assertEquals("closed", eventSink.awaitLogItem().action);
+        
+        assertNumberOfThreadsWithSubstring(name, 0, Duration.ofSeconds(2));
+      }
+    }
+  }
+  
+  private void assertNumberOfThreadsWithSubstring(String s, int expectedCount, Duration timeout) throws Exception {
+    Instant limit = Instant.now().plus(timeout);
+    int count = 0;
+    while (Instant.now().isBefore(limit)) {
+      int n = Thread.currentThread().getThreadGroup().activeCount();
+      Thread[] ts = new Thread[n];
+      Thread.currentThread().getThreadGroup().enumerate(ts, true);
+      count = 0;
+      for (Thread t: ts) {
+        if (t != null && t.isAlive() && t.getName().contains(s)) {
+          count++;
+        }
+      }
+      if (count == expectedCount) {
+        return;        
+      }
+      Thread.sleep(50);
+    }
+    fail("wanted " + expectedCount + " threads with substring '" + s
+        + "' but found " + count + " after " + timeout);
   }
   
   private static class ThreadCapturingHandler implements EventHandler {

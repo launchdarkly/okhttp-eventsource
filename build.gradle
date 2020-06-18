@@ -102,7 +102,9 @@ jacocoTestCoverageVerification {
     violationRules { rules ->
         def knownMissedLinesForMethods = [
             // The key for each of these items is the complete method signature minus the "com.launchdarkly.eventsource." prefix.
-            "EventSource.connect()": 12,
+            "EventSource.handleSuccessfulResponse(okhttp3.Response)": 2,
+            "EventSource.maybeReconnectDelay(int, long)": 2,
+            "EventSource.run()": 3,
             "EventSource.Builder.createInitialClientBuilder()": 1,
             "EventSource.Builder.defaultTrustManager()": 2,
             "SLF4JLogger.error(java.lang.String)": 2,

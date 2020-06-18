@@ -2,6 +2,11 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [2.3.1] - 2020-06-18
+### Fixed:
+- Worker threads might not be shut down after closing the EventSource, if the stream had previously been stopped due to a ConnectionErrorHandler returning `SHUTDOWN`. Now, the threads are stopped as soon as the stream is shut down for any reason. ([#51](https://github.com/launchdarkly/okhttp-eventsource/issues/51))
+- Fixed a race condition that could cause `onClosed()` not to be called in some circumstances where it should be called.
+
 ## [2.3.0] - 2020-06-02
 ### Added:
 - `EventSource.Builder.logger()` and the `Logger` interface allow a custom logging implementation to be used instead of SLF4J.

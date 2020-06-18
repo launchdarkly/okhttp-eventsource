@@ -1,5 +1,6 @@
 package com.launchdarkly.eventsource;
 
+import org.eclipse.jetty.server.HttpConnection;
 import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.handler.AbstractHandler;
@@ -223,10 +224,24 @@ public final class StubServer implements Closeable {
      * @return the handler
      */
     public static Handler returnStatus(final int status) {
-      return new Handler() {
-        public void handle(HttpServletRequest req, HttpServletResponse resp) {
-          resp.setStatus(status);
-        }
+      return (req, resp) -> {
+        resp.setStatus(status);
+      };
+    }
+    
+    /**
+     * Provides a handler that causes the server to close the connection immediately with no response,
+     * which should cause an IOException on the client side.
+     *  
+     * @return the handler
+     */
+    public static Handler ioError() {
+      return (req, resp) -> {
+        // This is very hacky, because Jetty - quite properly - does not allow you to do anything via the
+        // regular HttpServletResponse API that would cause an early shutdown of the connection. So we're
+        // messing with Jetty's connection internals.
+        HttpConnection conn = HttpConnection.getCurrentConnection();
+        conn.getHttpChannel().getEndPoint().close(); 
       };
     }
     

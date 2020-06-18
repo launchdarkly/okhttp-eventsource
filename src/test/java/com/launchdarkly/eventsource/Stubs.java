@@ -8,7 +8,7 @@ import static org.junit.Assert.assertNull;
 
 class Stubs {
   static class LogItem {
-    private final String action;
+    final String action;
     private final String[] params;
     final Throwable error;
 

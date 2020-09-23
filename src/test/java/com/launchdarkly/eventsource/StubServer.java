@@ -9,7 +9,6 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.net.URI;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -60,7 +59,7 @@ public class StubServer implements Closeable {
         baseRequest.setHandled(true);
       }
     });
-    server.setStopTimeout(1); // without this, Jetty does not interrupt worker threads on shutdown
+    server.setGracefulShutdown(1); // without this, Jetty does not interrupt worker threads on shutdown
     
     try {
       server.start();
@@ -89,7 +88,7 @@ public class StubServer implements Closeable {
    * @return the base URI
    */
   public URI getUri() {
-    return server.getURI();
+    return URI.create("http://" + server.getConnectors()[0].getName());
   }
   
   /**
@@ -108,12 +107,12 @@ public class StubServer implements Closeable {
   /**
    * Returns the next queued request, or null if none is available within the specified timeout.
    * 
-   * @param timeout the maximum time to wait
+   * @param timeout the maximum time to wait in milliseconds
    * @return the request information or null
    */
-  public RequestInfo awaitRequest(Duration timeout) {
+  public RequestInfo awaitRequest(int timeout) {
     try {
-      return requests.poll(timeout.toMillis(), TimeUnit.MILLISECONDS);
+      return requests.poll(timeout, TimeUnit.MILLISECONDS);
     } catch (InterruptedException e) {
       return null;
     }
@@ -384,7 +383,7 @@ public class StubServer implements Closeable {
      * @return the stream producer
      */
     public static StreamProducer streamProducerFromString(final String body, final boolean leaveOpen) {
-      return streamProducerFromChunkedString(body, body.length(), Duration.ZERO, leaveOpen);
+      return streamProducerFromChunkedString(body, body.length(), 0, leaveOpen);
     }
 
     /**
@@ -393,19 +392,19 @@ public class StubServer implements Closeable {
      * 
      * @param body the response body
      * @param chunkSize the number of characters per chunk
-     * @param chunkDelay how long to wait between chunks
+     * @param chunkDelay how long to wait between chunks in milliseconds
      * @param leaveOpen true to leave the stream open after sending this data, false to close it
      * @return the stream producer
      */
     public static StreamProducer streamProducerFromChunkedString(final String body, final int chunkSize,
-        final Duration chunkDelay, final boolean leaveOpen) {
+        final int chunkDelay, final boolean leaveOpen) {
       return new StreamProducer() {
         public boolean writeStream(BlockingQueue<String> chunks) {
           for (int p = 0; p < body.length(); p += chunkSize) {
             String chunk = body.substring(p, Math.min(p + chunkSize, body.length()));
             chunks.add(chunk);
             try {
-              Thread.sleep(chunkDelay.toMillis());
+              Thread.sleep(chunkDelay);
             } catch (InterruptedException e) {
               break;
             }

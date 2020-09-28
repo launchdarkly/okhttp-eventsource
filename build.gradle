@@ -32,7 +32,7 @@ allprojects {
 }
 
 ext.versions = [
-	"okhttp": "3.12.10",
+	"okhttp": "3.12.12",
 	"slf4j": "1.7.22"
 ]
 
@@ -41,7 +41,7 @@ dependencies {
     api "org.slf4j:slf4j-api:${versions.slf4j}"
     testImplementation "ch.qos.logback:logback-classic:1.1.9"
     testImplementation "org.mockito:mockito-core:1.10.19"
-    testCompile "org.eclipse.jetty:jetty-server:9.4.27.v20200227"
+    testCompile "org.eclipse.jetty:jetty-server:8.2.0.v20160908"
     testImplementation "junit:junit:4.11"
 }
 
@@ -147,3 +147,33 @@ signing {
     sign publishing.publications.mavenJava
 }
 
+// Overriding JAVA_HOME/executable paths allows us to build/test under Java 7 even though
+// Gradle itself has to run in Java 8+.
+
+tasks.withType(AbstractCompile) {
+  options.with {
+    if (overrideJavaHome != "") {
+      System.out.println("Building with JAVA_HOME=" + overrideJavaHome)
+      fork = true
+      forkOptions.javaHome = file(overrideJavaHome)
+    }
+  }
+}
+
+tasks.withType(Javadoc) {
+  if (overrideJavaHome != "") {
+    executable = new File(overrideJavaHome, "bin/javadoc")
+  }
+}
+
+tasks.withType(Test) {
+  if (overrideJavaHome != "") {
+    executable = new File(overrideJavaHome, "bin/java")
+  }
+}
+
+tasks.withType(JavaExec) {
+  if (overrideJavaHome != "") {
+    executable = new File(overrideJavaHome, "bin/java")
+  }
+}

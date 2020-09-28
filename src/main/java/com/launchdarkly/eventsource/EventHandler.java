@@ -16,6 +16,10 @@ public interface EventHandler {
    * This method is <i>not</i> called if the connection was closed due to a {@link ConnectionErrorHandler}
    * returning {@link ConnectionErrorHandler.Action#SHUTDOWN}; EventSource assumes that if you registered
    * such a handler and made it return that value, then you already know that the connection is being closed.
+   * <p>
+   * There is a known issue where {@code onClosed()} may or may not be called if the stream has been
+   * permanently closed by calling {@code close()}. This issue was fixed in the 2.3.1 release, but has not
+   * been backported to the 1.x support branch.
    * 
    * @throws Exception throwing an exception here will cause it to be logged and also sent to {@link #onError(Throwable)}
    */

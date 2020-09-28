@@ -70,7 +70,7 @@ public class ModernTLSSocketFactory extends SSLSocketFactory {
    * If the socket does not make these modern TLS protocols available at all, then just return the socket unchanged.
    *
    * @param s the socket
-   * @return
+   * @return the updated socket
    */
   static Socket setModernTlsVersionsOnSocket(Socket s) {
     if (s != null && (s instanceof SSLSocket)) {

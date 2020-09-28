@@ -22,7 +22,6 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.UnaryOperator;
 
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
@@ -170,17 +169,15 @@ public class EventSource implements ConnectionHandler, Closeable {
    * the same as calling {@link #start()}.
    */
   public void restart() {
-    ReadyState previousState = readyState.getAndUpdate(new UnaryOperator<ReadyState>() {
-      public ReadyState apply(ReadyState t) {
-        return t == ReadyState.OPEN ? ReadyState.CLOSED : t;
+    if (readyState.compareAndSet(OPEN, CLOSED)) {
+      closeCurrentStream(OPEN);
+    } else {
+      ReadyState currentState = getState();
+      if (currentState == RAW || currentState == CONNECTING) {
+        start();
       }
-    });
-    if (previousState == OPEN) {
-      closeCurrentStream(previousState);
-    } else if (previousState == RAW || previousState == CONNECTING) {
-      start();
+      // if already shutdown or in the process of closing, do nothing
     }
-    // if already shutdown or in the process of closing, do nothing
   }
   
   /**
@@ -339,10 +336,12 @@ public class EventSource implements ConnectionHandler, Closeable {
 
           // Reset the backoff if we had a successful connection that stayed good for at least
           // backoffResetThresholdMs milliseconds.
-          if (connectedTime >= 0 && (System.currentTimeMillis() - connectedTime) >= backoffResetThresholdMs) {
-            reconnectAttempts = 0;
+          if (nextState != SHUTDOWN) {
+            if (connectedTime >= 0 && (System.currentTimeMillis() - connectedTime) >= backoffResetThresholdMs) {
+              reconnectAttempts = 0;
+            }
+            maybeWaitWithBackoff(++reconnectAttempts);
           }
-          maybeWaitWithBackoff(++reconnectAttempts);
         }
       }
     } catch (RejectedExecutionException ignored) {

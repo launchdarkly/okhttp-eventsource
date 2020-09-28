@@ -1,10 +1,27 @@
-version: 2
+version: 2.1
+
+workflows:
+  test:
+    jobs:
+      - openjdk8
+      - openjdk7
+
 jobs:
-   build:
-     docker:
-       - image: circleci/openjdk:8
-     environment:
-       - TERM: dumb
-     steps:
-       - checkout
-       - run: ./gradlew test sourcesJar javadocJar
+  openjdk8:
+    docker:
+      - image: circleci/openjdk:8
+    environment:
+      - TERM: dumb
+    steps:
+      - checkout
+      - run: ./gradlew test sourcesJar javadocJar
+
+  openjdk7:
+    # This build uses LaunchDarkly's ld-jdk7-jdk8 image which has both OpenJDK 7 and
+    # OpenJDK 8 installed, with 8 being the default that is used to run Gradle.
+    # See: https://github.com/launchdarkly/sdks-ci-docker
+    docker:
+      - image: ldcircleci/ld-jdk7-jdk8
+    steps:
+      - checkout
+      - run: ./gradlew -i -Dorg.gradle.project.overrideJavaHome=$JDK7_HOME test sourcesJar javadocJar

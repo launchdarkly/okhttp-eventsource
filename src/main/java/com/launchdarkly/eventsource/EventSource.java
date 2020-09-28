@@ -336,10 +336,12 @@ public class EventSource implements ConnectionHandler, Closeable {
 
           // Reset the backoff if we had a successful connection that stayed good for at least
           // backoffResetThresholdMs milliseconds.
-          if (connectedTime >= 0 && (System.currentTimeMillis() - connectedTime) >= backoffResetThresholdMs) {
-            reconnectAttempts = 0;
+          if (nextState != SHUTDOWN) {
+            if (connectedTime >= 0 && (System.currentTimeMillis() - connectedTime) >= backoffResetThresholdMs) {
+              reconnectAttempts = 0;
+            }
+            maybeWaitWithBackoff(++reconnectAttempts);
           }
-          maybeWaitWithBackoff(++reconnectAttempts);
         }
       }
     } catch (RejectedExecutionException ignored) {

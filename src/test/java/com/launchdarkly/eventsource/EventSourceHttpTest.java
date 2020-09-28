@@ -203,13 +203,11 @@ public class EventSourceHttpTest {
 
   @Test
   public void streamDoesNotReconnectIfConnectionErrorHandlerSaysToStop() throws Exception {
-    final AtomicBoolean calledHandler = new AtomicBoolean(false);
-    final AtomicReference<Throwable> receivedError = new AtomicReference<Throwable>();
+    final BlockingQueue<Throwable> receivedError = new ArrayBlockingQueue<Throwable>(1);
     
     ConnectionErrorHandler connectionErrorHandler = new ConnectionErrorHandler() {
       public Action onConnectionError(Throwable t) {
-        calledHandler.set(true);
-        receivedError.set(t);
+        receivedError.add(t);
         return Action.SHUTDOWN;
       }
     };
@@ -222,19 +220,18 @@ public class EventSourceHttpTest {
           .reconnectTimeMs(10)
           .build()) {
         es.start();
-       
-        // If a ConnectionErrorHandler returns SHUTDOWN, EventSource does not call onClosed() or onError()
-        // on the regular event handler, since it assumes that the caller already knows what happened.
-        // Therefore we don't expect to see any items in eventSink.
-        eventSink.assertNoMoreLogItems();
+        
+        Throwable t = receivedError.poll(500, TimeUnit.MILLISECONDS);
+        assertNotNull(t);
+        assertEquals(UnsuccessfulResponseException.class, t.getClass());
+
+        // There's no way to know exactly when EventSource has transitioned its state to
+        // SHUTDOWN after calling the error handler, so this is an arbitrary delay
+        Thread.sleep(100);
 
         assertEquals(ReadyState.SHUTDOWN, es.getState());
       }
     }
-    
-    assertTrue(calledHandler.get());
-    assertNotNull(receivedError.get());
-    assertEquals(UnsuccessfulResponseException.class, receivedError.get().getClass());
   }
   
   @Test

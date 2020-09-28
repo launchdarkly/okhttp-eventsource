@@ -146,3 +146,34 @@ nexusPublishing {
 signing {
     sign publishing.publications.mavenJava
 }
+
+// Overriding JAVA_HOME/executable paths allows us to build/test under Java 7 even though
+// Gradle itself has to run in Java 8+.
+
+tasks.withType(AbstractCompile) {
+  options.with {
+    if (overrideJavaHome != "") {
+      System.out.println("Building with JAVA_HOME=" + overrideJavaHome)
+      fork = true
+      forkOptions.javaHome = file(overrideJavaHome)
+    }
+  }
+}
+
+tasks.withType(Javadoc) {
+  if (overrideJavaHome != "") {
+    executable = new File(overrideJavaHome, "bin/javadoc")
+  }
+}
+
+tasks.withType(Test) {
+  if (overrideJavaHome != "") {
+    executable = new File(overrideJavaHome, "bin/java")
+  }
+}
+
+tasks.withType(JavaExec) {
+  if (overrideJavaHome != "") {
+    executable = new File(overrideJavaHome, "bin/java")
+  }
+}

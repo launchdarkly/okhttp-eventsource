@@ -8,8 +8,9 @@ import org.junit.Test;
 
 import java.io.IOException;
 import java.time.Duration;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import static com.launchdarkly.eventsource.StubServer.Handlers.chunkFromString;
@@ -20,7 +21,6 @@ import static com.launchdarkly.eventsource.StubServer.Handlers.returnStatus;
 import static com.launchdarkly.eventsource.StubServer.Handlers.stream;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
 
 /**
  * End-to-end tests with real HTTP, specifically for the client's reconnect behavior.
@@ -179,13 +179,11 @@ public class EventSourceHttpReconnectTest {
 
   @Test
   public void streamDoesNotReconnectIfConnectionErrorHandlerSaysToStop() throws Exception {
-    final AtomicBoolean calledHandler = new AtomicBoolean(false);
-    final AtomicReference<Throwable> receivedError = new AtomicReference<Throwable>();
+    final BlockingQueue<Throwable> receivedError = new ArrayBlockingQueue<Throwable>(1);
     
     ConnectionErrorHandler connectionErrorHandler = new ConnectionErrorHandler() {
       public Action onConnectionError(Throwable t) {
-        calledHandler.set(true);
-        receivedError.compareAndSet(null, t);
+        receivedError.add(t);
         return Action.SHUTDOWN;
       }
     };
@@ -200,6 +198,14 @@ public class EventSourceHttpReconnectTest {
           .build()) {
         es.start();
        
+        Throwable t = receivedError.poll(500, TimeUnit.MILLISECONDS);
+        assertNotNull(t);
+        assertEquals(UnsuccessfulResponseException.class, t.getClass());
+
+        // There's no way to know exactly when EventSource has transitioned its state to
+        // SHUTDOWN after calling the error handler, so this is an arbitrary delay
+        Thread.sleep(100);
+
         // If a ConnectionErrorHandler returns SHUTDOWN, EventSource does not call onClosed() or onError()
         // on the regular event handler, since it assumes that the caller already knows what happened.
         // Therefore we don't expect to see any items in eventSink.
@@ -208,10 +214,6 @@ public class EventSourceHttpReconnectTest {
         assertEquals(ReadyState.SHUTDOWN, es.getState());
       }
     }
-    
-    assertTrue(calledHandler.get());
-    assertNotNull(receivedError.get());
-    assertEquals(UnsuccessfulResponseException.class, receivedError.get().getClass());
   }
   
   @Test

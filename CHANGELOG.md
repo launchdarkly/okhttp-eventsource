@@ -2,6 +2,13 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [1.11.2] - 2020-09-28
+### Fixed:
+- Restored compatibility with Java 7. CI builds now verify that the library can be compiled and tested in Java 7 rather than just building with a target JVM setting of 1.7.
+- Bumped OkHttp version to 3.12.12 to avoid a crash on Java 8u252.
+- Explicitly closing the stream could also cause an unnecessary backoff delay (with a log line about waiting X amount of time) before the stream task actually shut down.
+
+
 ## [1.11.1] - 2020-05-26
 ### Fixed:
 - Fixed a bug that could cause the randomized jitter not to be applied to reconnection delays if the reconnect interval (in milliseconds) was a power of two.

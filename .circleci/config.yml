@@ -1,0 +1,16 @@
+# stub configuration to prevent CircleCI from building this branch
+version: 2
+jobs:
+  empty-job:
+    docker:
+      - image: ubuntu:18.10
+    steps: []
+
+workflows:
+  version: 2
+  empty-build:
+    jobs:
+      - empty-job:
+          filters:
+            branches: 
+              only: not-gh-pages

@@ -27,59 +27,47 @@ class AsyncEventHandler implements EventHandler {
   }
 
   public void onOpen() {
-    acquire();
-    executor.execute(() -> {
+    execute(() -> {
       try {
         eventSourceHandler.onOpen();
       } catch (Exception e) {
         handleUnexpectedError(e);
-      } finally {
-        release();
       }
     });
   }
 
   public void onClosed() {
-    acquire();
-    executor.execute(() -> {
+    execute(() -> {
       try {
         eventSourceHandler.onClosed();
       } catch (Exception e) {
         handleUnexpectedError(e);
-      } finally {
-        release();
       }
     });
   }
 
   public void onComment(final String comment) {
-    acquire();
-    executor.execute(() -> {
+    execute(() -> {
       try {
         eventSourceHandler.onComment(comment);
       } catch (Exception e) {
         handleUnexpectedError(e);
-      } finally {
-        release();
       }
     });
   }
 
   public void onMessage(final String event, final MessageEvent messageEvent) {
-    acquire();
-    executor.execute(() -> {
+    execute(() -> {
       try {
         eventSourceHandler.onMessage(event, messageEvent);
       } catch (Exception e) {
         handleUnexpectedError(e);
-      } finally {
-        release();
       }
     });
   }
 
   public void onError(final Throwable error) {
-    executor.execute(() -> {
+    execute(() -> {
       onErrorInternal(error);
     });
   }
@@ -99,7 +87,24 @@ class AsyncEventHandler implements EventHandler {
     }
   }
 
-  private boolean acquire() {
+  private void execute(Runnable task) {
+    acquire();
+    try {
+      executor.execute(() -> {
+        try {
+          task.run();
+        } finally {
+          release();
+        }
+      });
+    } catch (Exception e) {
+      // probably a RejectedExecutionException due to pool shutdown
+      release();
+      throw e;
+    }
+  }
+
+  private void acquire() {
     if (semaphore != null) {
       try {
         semaphore.acquire();
@@ -107,7 +112,6 @@ class AsyncEventHandler implements EventHandler {
         throw new RejectedExecutionException("Thread interrupted while waiting for event thread semaphore", e);
       }
     }
-    return true;
   }
 
   private void release() {

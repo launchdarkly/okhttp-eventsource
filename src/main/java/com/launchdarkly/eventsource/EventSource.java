@@ -225,7 +225,7 @@ public class EventSource implements Closeable {
    *
    * @param timeout maximum time to wait for everything to shut down
    * @return {@code true} if all thread pools terminated within the specified timeout, {@code false} otherwise.
-   * @throws InterruptedException
+   * @throws InterruptedException if this thread is interrupted while blocking
    */
   public boolean awaitClosed(final Duration timeout) throws InterruptedException {
     final long deadline = System.currentTimeMillis() + timeout.toMillis();

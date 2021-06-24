@@ -2,6 +2,10 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [2.3.2] - 2021-06-24
+### Fixed:
+- Fixed a bug that caused the connection error handler to be called twice instead of once, with only the second return value being used. The second call would always pass an `EOFException` instead of the original error. The result was that any connection error handler logic that needed to distinguish between different kinds of errors would not work as intended.
+
 ## [2.3.1] - 2020-06-18
 ### Fixed:
 - Worker threads might not be shut down after closing the EventSource, if the stream had previously been stopped due to a ConnectionErrorHandler returning `SHUTDOWN`. Now, the threads are stopped as soon as the stream is shut down for any reason. ([#51](https://github.com/launchdarkly/okhttp-eventsource/issues/51))

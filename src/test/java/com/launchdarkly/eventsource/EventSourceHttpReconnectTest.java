@@ -21,6 +21,7 @@ import static com.launchdarkly.eventsource.StubServer.Handlers.returnStatus;
 import static com.launchdarkly.eventsource.StubServer.Handlers.stream;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 
 /**
  * End-to-end tests with real HTTP, specifically for the client's reconnect behavior.
@@ -211,6 +212,10 @@ public class EventSourceHttpReconnectTest {
         // Therefore we don't expect to see any items in eventSink.
         eventSink.assertNoMoreLogItems();
 
+        assertNotNull(server.awaitRequest(Duration.ZERO));
+        assertNull(server.awaitRequest(Duration.ZERO)); // no more requests should have been made
+        assertEquals(0, receivedError.size()); // error handler should have only been called once
+        
         assertEquals(ReadyState.SHUTDOWN, es.getState());
       }
     }

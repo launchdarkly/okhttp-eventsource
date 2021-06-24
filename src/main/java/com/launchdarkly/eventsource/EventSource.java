@@ -300,20 +300,21 @@ public class EventSource implements Closeable {
         if (response.isSuccessful()) {
           connectedTime.set(System.currentTimeMillis());
           handleSuccessfulResponse(response);
+
+          // If handleSuccessfulResponse returned without throwing an exception, it means the server
+          // ended the stream. We don't call the handler's onError() method in this case; but we will
+          // call the ConnectionErrorHandler with an EOFException, in case it wants to do something
+          // special in this scenario (like choose not to retry the connection). However, first we
+          // should check the state in case we've been deliberately closed from elsewhere.
+          ReadyState state = readyState.get();
+          if (state != SHUTDOWN && state != CLOSED) {
+            logger.warn("Connection unexpectedly closed");
+            errorHandlerAction = connectionErrorHandler.onConnectionError(new EOFException());
+          }
         } else {
           logger.debug("Unsuccessful response: {}", response);
           errorHandlerAction = dispatchError(new UnsuccessfulResponseException(response.code()));
         }
-      }
-      // If handleSuccessfulResponse returned without throwing an exception, it means the server
-      // ended the stream. We don't call the handler's onError() method in this case; but we will
-      // call the ConnectionErrorHandler with an EOFException, in case it wants to do something
-      // special in this scenario (like choose not to retry the connection). However, first we
-      // should check the state in case we've been deliberately closed from elsewhere.
-      ReadyState state = readyState.get();
-      if (state != SHUTDOWN && state != CLOSED) {
-        logger.warn("Connection unexpectedly closed");
-        errorHandlerAction = connectionErrorHandler.onConnectionError(new EOFException());
       }
     } catch (IOException e) {
       ReadyState state = readyState.get();

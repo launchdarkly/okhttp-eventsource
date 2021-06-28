@@ -338,7 +338,7 @@ public final class StubServer implements Closeable {
      * signals the end of the response.
      * 
      * @param contentType value for the Content-Type header
-     * @param streamProducer a {@link StreamProducer} that will provide the response
+     * @param chunks the queue that chunks have been (or will be) written to
      * @return the handler
      */
     public static Handler stream(final String contentType, final BlockingQueue<String> chunks) {

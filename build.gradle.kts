@@ -114,6 +114,7 @@ tasks.jacocoTestCoverageVerification.configure {
     violationRules {
         val knownMissedLinesForMethods = mapOf(
             // The key for each of these items is the complete method signature minus the "com.launchdarkly.eventsource." prefix.
+            "BufferedUtf8LineReader.getLineFromBuffer()" to 2,
             "EventSource.handleSuccessfulResponse(okhttp3.Response)" to 2,
             "EventSource.maybeReconnectDelay(int, long)" to 2,
             "EventSource.run()" to 3,

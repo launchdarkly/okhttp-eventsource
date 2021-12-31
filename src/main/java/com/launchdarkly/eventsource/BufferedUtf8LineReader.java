@@ -102,9 +102,9 @@ class BufferedUtf8LineReader {
       try {
         line = pendingUnterminatedLine.toString("UTF-8");
       } catch (UnsupportedEncodingException e) {
-        // This should be impossible since UTF-8 should always be supported, but the semantics of
-        // toString(String) require it. Once we no longer need to support Java 8, we can replace
-        // the string "UTF-8" with the Charset object UTF8 and then no such exception is possible.
+        // COVERAGE: This should be impossible since UTF-8 should always be supported, but the
+        // semantics of toString(String) require it. Once we no longer need to support Java 8, we
+        // can replace the string "UTF-8" with the Charset object UTF8.
         line = null;
       }
       pendingUnterminatedLine = null;

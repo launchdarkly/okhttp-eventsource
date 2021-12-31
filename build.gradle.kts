@@ -70,6 +70,7 @@ dependencies {
     testImplementation("ch.qos.logback:logback-classic:1.1.9")
     testImplementation("org.mockito:mockito-core:1.10.19")
     testImplementation("com.launchdarkly:test-helpers:1.0.0")
+    testImplementation("com.google.guava:guava:30.1-jre")
     testImplementation("junit:junit:4.12")
     testImplementation("org.hamcrest:hamcrest-all:1.3")
 }

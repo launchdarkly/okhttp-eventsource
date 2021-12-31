@@ -3,6 +3,7 @@ package com.launchdarkly.eventsource;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
 import java.nio.charset.Charset;
 
 /**
@@ -98,7 +99,14 @@ class BufferedUtf8LineReader {
     String line;
     if (pendingUnterminatedLine != null) {
       pendingUnterminatedLine.write(readBuffer, lineStart, lineEnd - lineStart);
-      line = pendingUnterminatedLine.toString(UTF8);
+      try {
+        line = pendingUnterminatedLine.toString("UTF-8");
+      } catch (UnsupportedEncodingException e) {
+        // This should be impossible since UTF-8 should always be supported, but the semantics of
+        // toString(String) require it. Once we no longer need to support Java 8, we can replace
+        // the string "UTF-8" with the Charset object UTF8 and then no such exception is possible.
+        line = null;
+      }
       pendingUnterminatedLine = null;
     } else {
       line = lineEnd == lineStart ? "" : new String(readBuffer, lineStart, lineEnd - lineStart, UTF8);

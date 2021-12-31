@@ -42,8 +42,6 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
-import okio.BufferedSource;
-import okio.Okio;
 
 /**
  * Client for <a href="https://www.w3.org/TR/2015/REC-eventsource-20150203/">Server-Sent Events</a>
@@ -366,16 +364,13 @@ public class EventSource implements Closeable {
     logger.info("Connected to EventSource stream.");
     handler.onOpen();
     
-    try (BufferedSource bufferedSource = Okio.buffer(response.body().source())) {
-      EventParser parser = new EventParser(url.uri(), handler, connectionHandler, logger);
-      // COVERAGE: the isInterrupted() condition is not encountered in unit tests and it's unclear if it can ever happen
-      for (String line; !Thread.currentThread().isInterrupted() &&
-          !bufferedSource.exhausted() && (line = bufferedSource.readUtf8LineStrict()) != null; ) {
-        parser.line(line);
-      }
-    } catch (EOFException e) {
-      // This should not happen because bufferedSource.exhausted() should have returned true, but if
-      // it does happen, we'll treat it the same as a regular end of stream.
+    BufferedUtf8LineReader lineReader = new BufferedUtf8LineReader(response.body().byteStream(), 1000);
+    EventParser parser = new EventParser(url.uri(), handler, connectionHandler, logger);
+    
+    // COVERAGE: the isInterrupted() condition is not encountered in unit tests and it's unclear if it can ever happen
+    for (String line; !Thread.currentThread().isInterrupted() &&
+          (line = lineReader.readLine()) != null; ) {
+      parser.line(line);
     }
   }
   

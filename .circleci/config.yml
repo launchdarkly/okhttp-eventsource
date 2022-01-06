@@ -53,7 +53,7 @@ jobs:
       - attach_workspace:
           at: build
       - run: java -version
-      - run: ./gradlew test
+      - run: make test
       - when:
           condition: <<parameters.with-coverage>>
           steps:
@@ -76,6 +76,13 @@ jobs:
           path: ~/junit
       - store_artifacts:
           path: ~/junit
+
+      - run: make build-contract-tests
+      - run:
+          command: make start-contract-test-service
+          background: true
+      - run: make run-contract-tests
+
       - when:
           condition: <<parameters.with-coverage>>
           steps:

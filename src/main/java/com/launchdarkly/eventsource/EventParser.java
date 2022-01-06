@@ -53,7 +53,7 @@ public class EventParser {
       }
       processField(field, value);
     } else {
-      processField(line.trim(), EMPTY_STRING); // The spec doesn't say we need to trim the line, but I assume that's an oversight.
+      processField(line, EMPTY_STRING);
     }
   }
 
@@ -69,7 +69,9 @@ public class EventParser {
     if (DATA.equals(field)) {
       data.append(value).append("\n");
     } else if (ID.equals(field)) {
-      lastEventId = value;
+      if (!value.contains("\u0000")) { // per specification, id field cannot contain a null character
+        lastEventId = value;
+      }
     } else if (EVENT.equals(field)) {
       eventName = value;
     } else if (RETRY.equals(field) && isNumber(value)) {

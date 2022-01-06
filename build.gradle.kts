@@ -69,7 +69,8 @@ dependencies {
     api("org.slf4j:slf4j-api:${Versions.slf4j}")
     testImplementation("ch.qos.logback:logback-classic:1.1.9")
     testImplementation("org.mockito:mockito-core:1.10.19")
-    testImplementation("org.eclipse.jetty:jetty-server:9.4.27.v20200227")
+    testImplementation("com.launchdarkly:test-helpers:1.0.0")
+    testImplementation("com.google.guava:guava:30.1-jre")
     testImplementation("junit:junit:4.12")
     testImplementation("org.hamcrest:hamcrest-all:1.3")
 }
@@ -113,6 +114,7 @@ tasks.jacocoTestCoverageVerification.configure {
     violationRules {
         val knownMissedLinesForMethods = mapOf(
             // The key for each of these items is the complete method signature minus the "com.launchdarkly.eventsource." prefix.
+            "BufferedUtf8LineReader.getLineFromBuffer()" to 2,
             "EventSource.handleSuccessfulResponse(okhttp3.Response)" to 2,
             "EventSource.maybeReconnectDelay(int, long)" to 2,
             "EventSource.run()" to 3,

@@ -1,0 +1,38 @@
+
+plugins {
+    id "java"
+    id "application"
+}
+
+repositories {
+    mavenCentral()
+    maven { url "https://oss.sonatype.org/content/groups/public/" }
+}
+
+allprojects {
+    sourceCompatibility = 1.8
+    targetCompatibility = 1.8
+}
+
+archivesBaseName = "okhttp-eventsource-test-service"
+
+application {
+    mainClassName = "ssetest.TestService"
+}
+
+ext.versions = [
+    "gson": "2.7",
+    "logback": "1.1.3",
+    "testHelpers": "1.1.0"
+]
+
+configurations {
+    deps.extendsFrom(implementation)
+}
+
+dependencies {
+    implementation project(":eventsource")
+    implementation "ch.qos.logback:logback-classic:${versions.logback}"
+    implementation "com.google.code.gson:gson:${versions.gson}"
+    implementation "com.launchdarkly:test-helpers:${versions.testHelpers}"
+}

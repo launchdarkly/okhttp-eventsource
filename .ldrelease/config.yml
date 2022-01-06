@@ -1,12 +1,14 @@
+version: 2
+
 repo:
   public: okhttp-eventsource
   private: okhttp-eventsource-private
 
-releasableBranches:
-  - name: master
-    description: 2.x - for Java SDK 5.0+
-  - name: 1.x
-    description: for Java SDK <5.0
+jobs:
+  - docker:
+      image: gradle:6.8.3-jdk11
+    template:
+      name: gradle
 
 publications:
   - url: https://oss.sonatype.org/content/groups/public/com/launchdarkly/okhttp-eventsource/
@@ -14,10 +16,5 @@ publications:
   - url: https://javadoc.io/doc/com.launchdarkly/okhttp-eventsource
     description: documentation (javadoc.io)
 
-template:
-  name: gradle
-  skip:
-    - test # for unknown reasons, the unit tests hang in the Releaser environment even though they work in CI
-
 documentation:
-  githubPages: true
+  gitHubPages: true

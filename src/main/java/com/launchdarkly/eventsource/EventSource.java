@@ -42,8 +42,6 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
-import okio.BufferedSource;
-import okio.Okio;
 
 /**
  * Client for <a href="https://www.w3.org/TR/2015/REC-eventsource-20150203/">Server-Sent Events</a>
@@ -76,7 +74,11 @@ public class EventSource implements Closeable {
    * The default value for {@link Builder#backoffResetThreshold(Duration)}: 60 seconds.
    */
   public static final Duration DEFAULT_BACKOFF_RESET_THRESHOLD = Duration.ofSeconds(60);
-
+  /**
+   * The default value for {@link Builder#readBufferSize(int)}.
+   */
+  public static final int DEFAULT_READ_BUFFER_SIZE = 1000;
+  
   private static final Headers defaultHeaders =
       new Headers.Builder().add("Accept", "text/event-stream").add("Cache-Control", "no-cache").build();
   
@@ -88,6 +90,7 @@ public class EventSource implements Closeable {
   private final RequestTransformer requestTransformer;
   private final ExecutorService eventExecutor;
   private final ExecutorService streamExecutor;
+  final int readBufferSize; // visible for tests
   volatile Duration reconnectTime; // visible for tests
   final Duration maxReconnectTime; // visible for tests
   final Duration backoffResetThreshold; // visible for tests
@@ -124,6 +127,7 @@ public class EventSource implements Closeable {
     this.handler = new AsyncEventHandler(this.eventExecutor, builder.handler, logger);
     this.connectionErrorHandler = builder.connectionErrorHandler == null ?
         ConnectionErrorHandler.DEFAULT : builder.connectionErrorHandler;
+    this.readBufferSize = builder.readBufferSize;
     this.readyState = new AtomicReference<>(RAW);
     this.client = builder.clientBuilder.build();
   }
@@ -366,16 +370,14 @@ public class EventSource implements Closeable {
     logger.info("Connected to EventSource stream.");
     handler.onOpen();
     
-    try (BufferedSource bufferedSource = Okio.buffer(response.body().source())) {
-      EventParser parser = new EventParser(url.uri(), handler, connectionHandler, logger);
-      // COVERAGE: the isInterrupted() condition is not encountered in unit tests and it's unclear if it can ever happen
-      for (String line; !Thread.currentThread().isInterrupted() &&
-          !bufferedSource.exhausted() && (line = bufferedSource.readUtf8LineStrict()) != null; ) {
-        parser.line(line);
-      }
-    } catch (EOFException e) {
-      // This should not happen because bufferedSource.exhausted() should have returned true, but if
-      // it does happen, we'll treat it the same as a regular end of stream.
+    BufferedUtf8LineReader lineReader = new BufferedUtf8LineReader(
+        response.body().byteStream(), readBufferSize);
+    EventParser parser = new EventParser(url.uri(), handler, connectionHandler, logger);
+    
+    // COVERAGE: the isInterrupted() condition is not encountered in unit tests and it's unclear if it can ever happen
+    for (String line; !Thread.currentThread().isInterrupted() &&
+          (line = lineReader.readLine()) != null; ) {
+      parser.line(line);
     }
   }
   
@@ -511,6 +513,7 @@ public class EventSource implements Closeable {
     private RequestTransformer requestTransformer = null;
     private RequestBody body = null;
     private OkHttpClient.Builder clientBuilder;
+    private int readBufferSize = DEFAULT_READ_BUFFER_SIZE;
     private Logger logger = null;
     private String loggerBaseName = null;
     
@@ -827,6 +830,31 @@ public class EventSource implements Closeable {
      */
     public Builder clientBuilderActions(ClientConfigurer configurer) {
       configurer.configure(clientBuilder);
+      return this;
+    }
+    
+    /**
+     * Specifies the fixed size of the buffer that EventSource uses to parse incoming data.
+     * <p>
+     * EventSource allocates a single buffer to hold data from the stream as it scans for
+     * line breaks. If no lines of data from the stream exceed this size, it will keep reusing
+     * the same space; if a line is longer than this size, it creates a temporary
+     * {@code ByteArrayOutputStream} to accumulate data for that line, which is less efficient.
+     * Therefore, if an application expects to see many lines in the stream that are longer
+     * than {@link EventSource#DEFAULT_READ_BUFFER_SIZE}, it can specify a larger buffer size
+     * to avoid unnecessary heap allocations.
+     * 
+     * @param readBufferSize
+     * @return the builder
+     * @throws IllegalArgumentException if the size is less than or equal to zero
+     * @see EventSource#DEFAULT_READ_BUFFER_SIZE
+     * @since 2.4.0
+     */
+    public Builder readBufferSize(int readBufferSize) {
+      if (readBufferSize <= 0) {
+        throw new IllegalArgumentException("readBufferSize must be greater than zero");
+      }
+      this.readBufferSize = readBufferSize;
       return this;
     }
     

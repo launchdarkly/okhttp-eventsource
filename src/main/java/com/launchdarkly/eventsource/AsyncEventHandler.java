@@ -2,6 +2,8 @@ package com.launchdarkly.eventsource;
 
 
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.Semaphore;
 
 /**
  * Adapted from https://github.com/aslakhellesoy/eventsource-java/blob/master/src/main/java/com/github/eventsource/client/impl/AsyncEventSourceHandler.java
@@ -15,15 +17,17 @@ class AsyncEventHandler implements EventHandler {
   private final Executor executor;
   private final EventHandler eventSourceHandler;
   private final Logger logger;
+  final Semaphore semaphore; // visible for tests
 
-  AsyncEventHandler(Executor executor, EventHandler eventSourceHandler, Logger logger) {
+  AsyncEventHandler(Executor executor, EventHandler eventSourceHandler, Logger logger, Semaphore semaphore) {
     this.executor = executor;
     this.eventSourceHandler = eventSourceHandler;
     this.logger = logger;
+    this.semaphore = semaphore;
   }
 
   public void onOpen() {
-    executor.execute(() -> {
+    execute(() -> {
       try {
         eventSourceHandler.onOpen();
       } catch (Exception e) {
@@ -33,7 +37,7 @@ class AsyncEventHandler implements EventHandler {
   }
 
   public void onClosed() {
-    executor.execute(() -> {
+    execute(() -> {
       try {
         eventSourceHandler.onClosed();
       } catch (Exception e) {
@@ -43,7 +47,7 @@ class AsyncEventHandler implements EventHandler {
   }
 
   public void onComment(final String comment) {
-    executor.execute(() -> {
+    execute(() -> {
       try {
         eventSourceHandler.onComment(comment);
       } catch (Exception e) {
@@ -53,7 +57,7 @@ class AsyncEventHandler implements EventHandler {
   }
 
   public void onMessage(final String event, final MessageEvent messageEvent) {
-    executor.execute(() -> {
+    execute(() -> {
       try {
         eventSourceHandler.onMessage(event, messageEvent);
       } catch (Exception e) {
@@ -63,7 +67,7 @@ class AsyncEventHandler implements EventHandler {
   }
 
   public void onError(final Throwable error) {
-    executor.execute(() -> {
+    execute(() -> {
       onErrorInternal(error);
     });
   }
@@ -80,6 +84,39 @@ class AsyncEventHandler implements EventHandler {
     } catch (Throwable errorFromErrorHandler) {
       logger.warn("Caught unexpected error from EventHandler.onError(): " + errorFromErrorHandler.toString());
       logger.debug("Stack trace: {}", new LazyStackTrace(error));
+    }
+  }
+
+  private void execute(Runnable task) {
+    acquire();
+    try {
+      executor.execute(() -> {
+        try {
+          task.run();
+        } finally {
+          release();
+        }
+      });
+    } catch (Exception e) {
+      // probably a RejectedExecutionException due to pool shutdown
+      release();
+      throw e;
+    }
+  }
+
+  private void acquire() {
+    if (semaphore != null) {
+      try {
+        semaphore.acquire();
+      } catch (InterruptedException e) {
+        throw new RejectedExecutionException("Thread interrupted while waiting for event thread semaphore", e);
+      }
+    }
+  }
+
+  private void release() {
+    if (semaphore != null) {
+      semaphore.release();
     }
   }
 }

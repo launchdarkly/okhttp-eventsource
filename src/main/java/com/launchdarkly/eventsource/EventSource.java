@@ -16,6 +16,7 @@ import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -95,7 +96,7 @@ public class EventSource implements Closeable {
   final Duration maxReconnectTime; // visible for tests
   final Duration backoffResetThreshold; // visible for tests
   private volatile String lastEventId;
-  private final AsyncEventHandler handler;
+  final AsyncEventHandler handler; // visible for tests
   private final ConnectionErrorHandler connectionErrorHandler;
   private final AtomicReference<ReadyState> readyState;
   private final OkHttpClient client;
@@ -124,7 +125,13 @@ public class EventSource implements Closeable {
     this.eventExecutor = Executors.newSingleThreadExecutor(eventsThreadFactory);
     ThreadFactory streamThreadFactory = createThreadFactory("okhttp-eventsource-stream", builder.threadPriority);
     this.streamExecutor = Executors.newSingleThreadExecutor(streamThreadFactory);
-    this.handler = new AsyncEventHandler(this.eventExecutor, builder.handler, logger);
+    Semaphore eventThreadSemaphore;
+    if (builder.maxEventTasksInFlight > 0) {
+      eventThreadSemaphore = new Semaphore(builder.maxEventTasksInFlight);
+    } else {
+      eventThreadSemaphore = null;
+    }
+    this.handler = new AsyncEventHandler(this.eventExecutor, builder.handler, logger, eventThreadSemaphore);
     this.connectionErrorHandler = builder.connectionErrorHandler == null ?
         ConnectionErrorHandler.DEFAULT : builder.connectionErrorHandler;
     this.readBufferSize = builder.readBufferSize;
@@ -215,6 +222,35 @@ public class EventSource implements Closeable {
         client.dispatcher().executorService().shutdownNow();
       }
     }
+  }
+
+  /**
+   * Block until all underlying threads have terminated and resources have been released.
+   *
+   * @param timeout maximum time to wait for everything to shut down
+   * @return {@code true} if all thread pools terminated within the specified timeout, {@code false} otherwise.
+   * @throws InterruptedException if this thread is interrupted while blocking
+   */
+  public boolean awaitClosed(final Duration timeout) throws InterruptedException {
+    final long deadline = System.currentTimeMillis() + timeout.toMillis();
+
+    if (!eventExecutor.awaitTermination(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+      return false;
+    }
+
+    long shutdownTimeoutMills = Math.max(0, deadline - System.currentTimeMillis());
+    if (!streamExecutor.awaitTermination(shutdownTimeoutMills, TimeUnit.MILLISECONDS)) {
+      return false;
+    }
+
+    if (client.dispatcher().executorService() != null) {
+      shutdownTimeoutMills = Math.max(0, deadline - System.currentTimeMillis());
+      if (!client.dispatcher().executorService().awaitTermination(shutdownTimeoutMills, TimeUnit.MILLISECONDS)) {
+        return false;
+      }
+    }
+
+    return true;
   }
   
   private void closeCurrentStream(ReadyState previousState) {
@@ -516,6 +552,7 @@ public class EventSource implements Closeable {
     private int readBufferSize = DEFAULT_READ_BUFFER_SIZE;
     private Logger logger = null;
     private String loggerBaseName = null;
+    private int maxEventTasksInFlight = 0;
     
     /**
      * Creates a new builder.
@@ -887,7 +924,23 @@ public class EventSource implements Closeable {
       this.loggerBaseName = loggerBaseName;
       return this;
     }
-    
+
+    /**
+     * Specifies the maximum number of tasks that can be "in-flight" for the thread executing {@link EventHandler}.
+     * A semaphore will be used to artificially constrain the number of tasks sitting in the queue fronting the
+     * event handler thread. When this limit is reached the stream thread will block until the backpressure passes.
+     * <p>
+     * For backward compatibility reasons the default is "unbounded".
+     *
+     * @param maxEventTasksInFlight the maximum number of tasks/messages that can be in-flight for the {@code EventHandler}
+     * @return the builder
+     * @since 2.4.0
+     */
+    public Builder maxEventTasksInFlight(int maxEventTasksInFlight) {
+      this.maxEventTasksInFlight = maxEventTasksInFlight;
+      return this;
+    }
+
     /**
      * Constructs an {@link EventSource} using the builder's current properties.
      * @return the new EventSource instance

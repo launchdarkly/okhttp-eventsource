@@ -2,6 +2,25 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [2.4.0] - 2022-01-06
+This release fixes a number of SSE spec compliance issues which do not affect usage in the LaunchDarkly Java and Android SDKs, but could be relevant in other use cases.
+
+### Added:
+- `EventSource.Builder.readBufferSize`
+
+### Changed:
+- The implementation of stream parsing has been changed. Previously, we were using `BufferedSource` from the `okio` library, but that API did not support `\r` line terminators (see below). Now we use our own implementation, which is simpler than `BufferedSource` and is optimized for reading text lines in UTF-8.
+- The CI build now incorporates the cross-platform contract tests defined in https://github.com/launchdarkly/sse-contract-tests to ensure consistent test coverage across different LaunchDarkly SSE implementations.
+
+### Fixed:
+- The stream parser did not support a `\r` character by itself as a line terminator. The SSE specification requires that `\r`, `\n`, and `\r\n` are all valid.
+- If an event's `id:` field contains a null character, the whole field should be ignored.
+- The parser was incorrectly trimming spaces from lines that did not contain a colon, so for instance `data[space]` was being treated as an empty `data` field, when it is really an invalid field name that should be ignored.
+
+## [2.3.2] - 2021-06-24
+### Fixed:
+- Fixed a bug that caused the connection error handler to be called twice instead of once, with only the second return value being used. The second call would always pass an `EOFException` instead of the original error. The result was that any connection error handler logic that needed to distinguish between different kinds of errors would not work as intended.
+
 ## [2.3.1] - 2020-06-18
 ### Fixed:
 - Worker threads might not be shut down after closing the EventSource, if the stream had previously been stopped due to a ConnectionErrorHandler returning `SHUTDOWN`. Now, the threads are stopped as soon as the stream is shut down for any reason. ([#51](https://github.com/launchdarkly/okhttp-eventsource/issues/51))
@@ -43,6 +62,12 @@ All notable changes to the LaunchDarkly EventSource implementation for Java will
 
 ### Removed:
 - In `EventSource`: `setHttpUrl`, `setLastEventId`, `setMaxReconnectTime`, `setReconnectionTime`, `setUri` (these can only be set in the builder).
+
+## [1.11.2] - 2020-09-28
+### Fixed:
+- Restored compatibility with Java 7. CI builds now verify that the library can be compiled and tested in Java 7 rather than just building with a target JVM setting of 1.7.
+- Bumped OkHttp version to 3.12.12 to avoid a crash on Java 8u252.
+- Explicitly closing the stream could also cause an unnecessary backoff delay (with a log line about waiting X amount of time) before the stream task actually shut down.
 
 ## [1.11.1] - 2020-05-26
 ### Fixed:

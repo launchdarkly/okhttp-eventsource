@@ -25,6 +25,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.Mockito.mock;
 
 import okhttp3.Authenticator;
@@ -310,6 +311,24 @@ public class EventSourceBuilderTest {
     OkHttpClient client0 = new OkHttpClient.Builder().connectTimeout(Duration.ofSeconds(11)).build();
     OkHttpClient client1 = builder.client(client0).getClientBuilder().build();
     assertEquals(client0.connectTimeoutMillis(), client1.connectTimeoutMillis());
+  }
+  
+  @Test
+  public void readBufferSize() throws IOException {
+    try (EventSource es = builder.build()) {
+      assertEquals(EventSource.DEFAULT_READ_BUFFER_SIZE, es.readBufferSize);      
+    }
+    try (EventSource es = builder.readBufferSize(9999).build()) {
+      assertEquals(9999, es.readBufferSize);
+    }
+    try {
+      builder.readBufferSize(0);
+      fail("expected exception");
+    } catch (IllegalArgumentException e) {}
+    try {
+      builder.readBufferSize(-1);
+      fail("expected exception");
+    } catch (IllegalArgumentException e) {}
   }
   
   @Test

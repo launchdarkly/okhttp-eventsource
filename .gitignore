@@ -1,7 +1,8 @@
 # Eclipse project files
 .classpath
 .project
- 
+.settings
+
 # Intellij project files
 *.iml
 *.ipr

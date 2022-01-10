@@ -18,12 +18,12 @@ The project builds with [Gradle](https://gradle.org/) and should be built agains
 
 To build the project without running any tests:
 ```
-./gradlew jar
+make
 ```
 
 If you wish to clean your working directory between builds, you can clean it by running:
 ```
-./gradlew clean
+make clean
 ```
 
 If you wish to use your generated SDK artifact by another Maven/Gradle project such as [java-server-sdk](https://github.com/launchdarkly/java-server-sdk), you will likely want to publish the artifact to your local Maven repository so that your other project can access it.
@@ -35,7 +35,12 @@ If you wish to use your generated SDK artifact by another Maven/Gradle project s
  
 To build the project and run all unit tests:
 ```
-./gradlew test
+make test
+```
+
+To run the standardized contract tests that are run against all LaunchDarkly SSE client implementations:
+```
+make contract-tests
 ```
 
 ## Note on Java version and Android support

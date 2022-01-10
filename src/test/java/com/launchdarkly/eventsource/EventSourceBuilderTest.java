@@ -23,8 +23,10 @@ import static com.launchdarkly.eventsource.EventSource.DEFAULT_WRITE_TIMEOUT;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.mock;
 
@@ -383,6 +385,20 @@ public class EventSourceBuilderTest {
     Logger myLogger = new SLF4JLogger("x");
     try (EventSource es = builder.logger(myLogger).build()) {
       assertSame(myLogger, es.logger);
+    }
+  }
+
+  @Test
+  public void defaultEventThreadWorkQueueCapacity() {
+    try (EventSource es = builder.build()) {
+      assertNull(es.handler.semaphore);
+    }
+  }
+
+  @Test
+  public void eventThreadWorkQueueCapacity() {
+    try (EventSource es = builder.maxEventTasksInFlight(8).build()) {
+      assertEquals(8, es.handler.semaphore.availablePermits());
     }
   }
 }

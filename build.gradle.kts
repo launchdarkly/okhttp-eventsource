@@ -21,9 +21,9 @@ plugins {
     signing
     "maven-publish"
     idea
-    id("org.jetbrains.kotlin.jvm") version "1.3.61"
+    id("org.jetbrains.kotlin.jvm") version "1.6.10"
     id("de.marcphilipp.nexus-publish") version "0.4.0"
-    id("io.codearte.nexus-staging") version "0.21.2"
+    id("io.codearte.nexus-staging") version "0.30.0"
 }
 
 // Note about org.jetbrains.kotlin.jvm in the plugins block:
@@ -102,9 +102,9 @@ tasks.test.configure {
 
 tasks.jacocoTestReport.configure {
     reports {
-        xml.isEnabled = true
-        csv.isEnabled = true
-        html.isEnabled = true
+        xml.required.set(true)
+        csv.required.set(true)
+        html.required.set(true)
     }
 }
 

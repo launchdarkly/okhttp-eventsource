@@ -934,7 +934,7 @@ public class EventSource implements Closeable {
      *
      * @param maxEventTasksInFlight the maximum number of tasks/messages that can be in-flight for the {@code EventHandler}
      * @return the builder
-     * @since 2.4.0
+     * @since 2.5.0
      */
     public Builder maxEventTasksInFlight(int maxEventTasksInFlight) {
       this.maxEventTasksInFlight = maxEventTasksInFlight;

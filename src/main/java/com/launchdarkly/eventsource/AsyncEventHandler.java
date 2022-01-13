@@ -97,7 +97,7 @@ class AsyncEventHandler implements EventHandler {
           release();
         }
       });
-    } catch (Exception e) {
+    } catch (Exception e) { // COVERAGE: this condition can't be reproduced in unit tests
       // probably a RejectedExecutionException due to pool shutdown
       release();
       throw e;
@@ -108,7 +108,7 @@ class AsyncEventHandler implements EventHandler {
     if (semaphore != null) {
       try {
         semaphore.acquire();
-      } catch (InterruptedException e) {
+      } catch (InterruptedException e) { // COVERAGE: this condition can't be reproduced in unit tests
         throw new RejectedExecutionException("Thread interrupted while waiting for event thread semaphore", e);
       }
     }

@@ -2,6 +2,7 @@ package com.launchdarkly.eventsource;
 
 import com.launchdarkly.eventsource.Stubs.LogItem;
 import com.launchdarkly.eventsource.Stubs.TestHandler;
+
 import org.junit.After;
 import org.junit.Test;
 
@@ -15,11 +16,11 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Matchers.any;
+import static org.mockito.Matchers.anyString;
 import static org.mockito.Matchers.eq;
-import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 
 @SuppressWarnings("javadoc")
@@ -42,8 +43,8 @@ public class AsyncEventHandlerTest {
   }
   
   private void verifyErrorLogged(Throwable t) {
-    verify(logger).warn("Caught unexpected error from EventHandler: " + t);
-    verify(logger).debug(eq("Stack trace: {}"), any(LazyStackTrace.class));
+    verify(logger, timeout(1000)).warn("Caught unexpected error from EventHandler: " + t);
+    verify(logger, timeout(1000)).debug(eq("Stack trace: {}"), any(LazyStackTrace.class));
   }
   
   @Test
@@ -104,12 +105,13 @@ public class AsyncEventHandlerTest {
     eventHandler.fakeErrorFromErrorHandler = err2;
     
     asyncHandler.onOpen();
-    
+        
     assertEquals(LogItem.opened(), eventHandler.awaitLogItem());
     assertEquals(LogItem.error(err1), eventHandler.awaitLogItem());
-    verify(logger).warn("Caught unexpected error from EventHandler: " + err1);
-    verify(logger).warn("Caught unexpected error from EventHandler.onError(): " + err2);
-    verify(logger, times(2)).debug(eq("Stack trace: {}"), any(LazyStackTrace.class));
+    
+    verify(logger, timeout(1000)).warn("Caught unexpected error from EventHandler: " + err1);
+    verify(logger, timeout(1000)).warn("Caught unexpected error from EventHandler.onError(): " + err2);
+    verify(logger, timeout(1000).times(2)).debug(eq("Stack trace: {}"), any(LazyStackTrace.class));
   }
 
   @Test

@@ -240,13 +240,13 @@ public class EventSource implements Closeable {
 
     long shutdownTimeoutMills = Math.max(0, deadline - System.currentTimeMillis());
     if (!streamExecutor.awaitTermination(shutdownTimeoutMills, TimeUnit.MILLISECONDS)) {
-      return false;
+      return false; // COVERAGE: this condition can't be reproduced in unit tests
     }
 
     if (client.dispatcher().executorService() != null) {
       shutdownTimeoutMills = Math.max(0, deadline - System.currentTimeMillis());
       if (!client.dispatcher().executorService().awaitTermination(shutdownTimeoutMills, TimeUnit.MILLISECONDS)) {
-        return false;
+        return false; // COVERAGE: this condition can't be reproduced in unit tests
       }
     }
 

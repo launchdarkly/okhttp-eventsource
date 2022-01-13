@@ -14,13 +14,17 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.launchdarkly.eventsource.TestHandlers.chunksFromString;
 import static com.launchdarkly.eventsource.TestHandlers.streamThatStaysOpen;
 import static com.launchdarkly.testhelpers.httptest.Handlers.hang;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -341,16 +345,16 @@ public class EventSourceHttpTest {
 
   @Test(timeout = 15000)
   public void canAwaitClosed() throws Exception {
-    final String body = "data: data-by-itself\n\n" +
-            "event: event-with-data\n" +
-            "data: abc\n\n" +
-            ": this is a comment\n" +
-            "event: event-with-more-data-and-id\n" +
-            "id: my-id\n" +
-            "data: abc\n" +
-            "data: def\n\n";
+    final String body = "data: event1\n\n";
 
-    TestHandler eventSink = new TestHandler(testLogger.getLogger());
+    AtomicBoolean received = new AtomicBoolean(false);
+    TestHandler eventSink = new TestHandler(testLogger.getLogger()) {
+      @Override
+      public void onMessage(String event, MessageEvent messageEvent) throws Exception {
+        received.set(true);
+        super.onMessage(event, messageEvent);
+      }
+    };
     Handler streamHandler = chunksFromString(body, 5, Duration.ZERO, true);
 
     try (HttpServer server = HttpServer.start(streamHandler)) {
@@ -362,28 +366,56 @@ public class EventSourceHttpTest {
 
         assertEquals(LogItem.opened(), eventSink.awaitLogItem());
 
-        assertEquals(LogItem.event("message", "data-by-itself"), // "message" is the default event name, per SSE spec
+        assertEquals(LogItem.event("message", "event1"), // "message" is the default event name, per SSE spec
                 eventSink.awaitLogItem());
-
-        assertEquals(LogItem.event("event-with-data", "abc"),
-                eventSink.awaitLogItem());
-
-        assertEquals(LogItem.comment("this is a comment"),
-                eventSink.awaitLogItem());
-
-        assertEquals(LogItem.event("event-with-more-data-and-id",  "abc\ndef", "my-id"),
-                eventSink.awaitLogItem());
-
-        eventSink.assertNoMoreLogItems();
       } finally {
         es.close();
         assertTrue("Expected close to complete", es.awaitClosed(Duration.ofSeconds(10)));
+        assertTrue(received.get());
       }
     }
 
     assertEquals(LogItem.closed(), eventSink.awaitLogItem());
   }
 
+  @Test
+  public void awaitClosedTimesOutIfEventHandlerNotCompleted() throws Exception {
+    final String body = "data: event1\n\n";
+
+    CountDownLatch enteredHandler = new CountDownLatch(1);
+    CountDownLatch handlerCanProceed = new CountDownLatch(1);
+    TestHandler eventSink = new TestHandler(testLogger.getLogger()) {
+      @Override
+      public void onMessage(String event, MessageEvent messageEvent) throws Exception {
+        enteredHandler.countDown();
+        handlerCanProceed.await(5, TimeUnit.SECONDS);
+        super.onMessage(event, messageEvent);
+      }
+    };
+    Handler streamHandler = chunksFromString(body, 5, Duration.ZERO, true);
+
+    try (HttpServer server = HttpServer.start(streamHandler)) {
+      EventSource es = new EventSource.Builder(eventSink, server.getUri())
+              .logger(testLogger.getLogger())
+              .build();
+      try {
+        es.start();
+
+        assertEquals(LogItem.opened(), eventSink.awaitLogItem());
+
+        assertTrue("expected handler to be called", enteredHandler.await(1, TimeUnit.SECONDS));
+      } finally {
+        es.close();
+       
+        try {
+          assertFalse("Expected awaitClosed to time out", es.awaitClosed(Duration.ofSeconds(2)));
+        } finally {
+          handlerCanProceed.countDown();
+        }
+      }
+    }
+  }
+  
   @Test
   public void defaultThreadPriorityIsNotMaximum() throws Exception {
     ThreadCapturingHandler threadCapturingHandler = new ThreadCapturingHandler();

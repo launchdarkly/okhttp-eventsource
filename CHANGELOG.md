@@ -2,6 +2,15 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [2.5.0] - 2022-01-13
+### Added:
+- `EventSource.Builder.maxTasksInFlight` allows setting a limit on how many asynchronous event handler calls can be queued for dispatch at any given time. (Thanks, [thomaslee](https://github.com/launchdarkly/okhttp-eventsource/pull/58)!)
+- `EventSource.awaitClosed` provides confirmation that all asynchronous event handler calls have been completed after stopping the `EventSource`.  (Thanks, [thomaslee](https://github.com/launchdarkly/okhttp-eventsource/pull/58)!)
+
+### Changed:
+- The build has been updated to use Gradle 7.
+- The CI build now includes testing in Java 17.
+
 ## [2.4.0] - 2022-01-06
 This release fixes a number of SSE spec compliance issues which do not affect usage in the LaunchDarkly Java and Android SDKs, but could be relevant in other use cases.
 

@@ -15,11 +15,20 @@ workflows:
       - test-linux:
           name: Java 11 - Linux - OpenJDK
           docker-image: cimg/openjdk:11.0
+          requires:
+            - build-linux
+      - test-linux:
+          name: Java 17 - Linux - OpenJDK
+          docker-image: cimg/openjdk:17.0
           with-coverage: true
           requires:
             - build-linux
       - build-test-windows:
           name: Java 11 - Windows - OpenJDK
+          openjdk-version: 11.0.2.01
+      - build-test-windows:
+          name: Java 17 - Windows - OpenJDK
+          openjdk-version: 17.0.1
 
 jobs:
   build-linux:
@@ -90,17 +99,21 @@ jobs:
                 path: coverage
 
   build-test-windows:
+    parameters:
+      openjdk-version:
+        type: string
     executor:
       name: win/vs2019
       shell: powershell.exe
     steps:
       - checkout
       - run:
+          name: uninstall previous openjdk
+          command: choco uninstall openjdk
+      - run:
           name: install OpenJDK
-          command: |
-            $ProgressPreference = "SilentlyContinue"  # prevents console errors from CircleCI host
-            iwr -outf openjdk.msi https://developers.redhat.com/download-manager/file/java-11-openjdk-11.0.5.10-2.windows.redhat.x86_64.msi
-            Start-Process msiexec.exe -Wait -ArgumentList '/I openjdk.msi /quiet'
+          command: choco install openjdk --version <<parameters.openjdk-version>>
+      - run: java -version
       - run:
           name: build and test
           command: |

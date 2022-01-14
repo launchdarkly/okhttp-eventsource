@@ -21,9 +21,9 @@ plugins {
     signing
     "maven-publish"
     idea
-    id("org.jetbrains.kotlin.jvm") version "1.3.61"
+    id("org.jetbrains.kotlin.jvm") version "1.6.10"
     id("de.marcphilipp.nexus-publish") version "0.4.0"
-    id("io.codearte.nexus-staging") version "0.21.2"
+    id("io.codearte.nexus-staging") version "0.30.0"
 }
 
 // Note about org.jetbrains.kotlin.jvm in the plugins block:
@@ -102,9 +102,9 @@ tasks.test.configure {
 
 tasks.jacocoTestReport.configure {
     reports {
-        xml.isEnabled = true
-        csv.isEnabled = true
-        html.isEnabled = true
+        xml.required.set(true)
+        csv.required.set(true)
+        html.required.set(true)
     }
 }
 
@@ -114,7 +114,10 @@ tasks.jacocoTestCoverageVerification.configure {
     violationRules {
         val knownMissedLinesForMethods = mapOf(
             // The key for each of these items is the complete method signature minus the "com.launchdarkly.eventsource." prefix.
+            "AsyncEventHandler.acquire()" to 2,
+            "AsyncEventHandler.execute(java.lang.Runnable)" to 3,
             "BufferedUtf8LineReader.getLineFromBuffer()" to 2,
+            "EventSource.awaitClosed(java.time.Duration)" to 3,
             "EventSource.handleSuccessfulResponse(okhttp3.Response)" to 2,
             "EventSource.maybeReconnectDelay(int, long)" to 2,
             "EventSource.run()" to 3,

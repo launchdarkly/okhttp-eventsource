@@ -5,7 +5,9 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.Proxy;
+import java.net.Proxy.Type;
 import java.net.URI;
 import java.nio.charset.Charset;
 import java.time.Duration;
@@ -34,6 +36,8 @@ import okhttp3.OkHttpClient;
 import okhttp3.OkHttpClient.Builder;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import okhttp3.Response;
+import okhttp3.Route;
 import okio.Buffer;
 
 @SuppressWarnings("javadoc")
@@ -154,7 +158,7 @@ public class EventSourceBuilderTest {
 
   @Test
   public void defaultClientWithProxyHostAndPort() {
-    String proxyHost = "http://proxy.example.com";
+    String proxyHost = "https://launchdarkly.com";
     int proxyPort = 8080;
     builder.proxy(proxyHost, proxyPort);
     builder.build();
@@ -164,12 +168,13 @@ public class EventSourceBuilderTest {
     assertEquals(DEFAULT_READ_TIMEOUT.toMillis(), client.readTimeoutMillis());
     assertEquals(DEFAULT_WRITE_TIMEOUT.toMillis(), client.writeTimeoutMillis());
     Assert.assertNotNull(client.proxy());
-    assertEquals(proxyHost + ":" + proxyPort, client.proxy().address().toString());
+    assertEquals(proxyHost, ((InetSocketAddress)client.proxy().address()).getHostName());
+    assertEquals(proxyPort, ((InetSocketAddress)client.proxy().address()).getPort());
   }
 
   @Test
   public void defaultClientWithProxy() {
-    Proxy proxy = mock(java.net.Proxy.class);
+    Proxy proxy = new Proxy(Type.HTTP, new InetSocketAddress("http://proxy.example.com", 8080));
     builder.proxy(proxy);
     builder.build();
     OkHttpClient client = builder.getClientBuilder().build();
@@ -182,8 +187,12 @@ public class EventSourceBuilderTest {
 
   @Test
   public void proxyAuthenticator() {
-    Proxy proxy = mock(java.net.Proxy.class);
-    Authenticator auth = mock(Authenticator.class);
+    Proxy proxy = new Proxy(Type.HTTP, new InetSocketAddress("http://proxy.example.com", 8080));
+    Authenticator auth = new Authenticator() {
+      public Request authenticate(Route arg0, Response arg1) throws IOException {
+        return null;
+      }
+    };
     builder.proxy(proxy);
     builder.proxyAuthenticator(auth);
     builder.build();
@@ -374,6 +383,20 @@ public class EventSourceBuilderTest {
     Logger myLogger = new SLF4JLogger("x");
     try (EventSource es = builder.logger(myLogger).build()) {
       assertSame(myLogger, es.logger);
+    }
+  }
+
+  @Test
+  public void defaultEventThreadWorkQueueCapacity() {
+    try (EventSource es = builder.build()) {
+      assertNull(es.handler.semaphore);
+    }
+  }
+
+  @Test
+  public void eventThreadWorkQueueCapacity() {
+    try (EventSource es = builder.maxEventTasksInFlight(8).build()) {
+      assertEquals(8, es.handler.semaphore.availablePermits());
     }
   }
 }

@@ -1,5 +1,6 @@
 package com.launchdarkly.eventsource;
 
+import java.time.Duration;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -100,7 +101,8 @@ class Stubs {
     }
     
     public void onMessage(String event, MessageEvent messageEvent) throws Exception {
-      add(LogItem.event(event, messageEvent.getData(), messageEvent.getLastEventId()));
+      add(LogItem.event(event, messageEvent.isStreamingData() ? "<streaming>" : messageEvent.getData(),
+          messageEvent.getLastEventId()));
       maybeError();
     }
     
@@ -130,7 +132,7 @@ class Stubs {
     }
     
     LogItem awaitLogItem() {
-      int timeoutSeconds = 10;
+      int timeoutSeconds = 5;
       try {
         LogItem item = log.poll(timeoutSeconds, TimeUnit.SECONDS);
         if (item == null) {
@@ -147,5 +149,55 @@ class Stubs {
         assertNull(log.poll(100, TimeUnit.MILLISECONDS));
       } catch (InterruptedException e) {}
     }
+  }
+  
+  static class MessageSink implements EventHandler {
+    private final BlockingQueue<MessageEvent> queue = new ArrayBlockingQueue<>(100);
+    
+    @Override
+    public void onOpen() throws Exception {}
+
+    @Override
+    public void onClosed() throws Exception {}
+
+    @Override
+    public void onMessage(String event, MessageEvent messageEvent) throws Exception {
+      queue.add(messageEvent);
+    }
+
+    @Override
+    public void onComment(String comment) throws Exception {}
+
+    @Override
+    public void onError(Throwable t) {}
+    
+    MessageEvent awaitEvent() {
+      int timeoutSeconds = 5;
+      try {
+        MessageEvent e = queue.poll(timeoutSeconds, TimeUnit.SECONDS);
+        if (e == null) {
+          throw new RuntimeException("did not receive expected message within " + timeoutSeconds + " seconds");
+        }
+        return e;
+      } catch (InterruptedException ex) {
+        throw new RuntimeException("thread interrupted while waiting for handler to be called");
+      }
+    }
+    
+    void assertNoMoreEvents() {
+      try {
+        assertNull(queue.poll(100, TimeUnit.MILLISECONDS));
+      } catch (InterruptedException e) {}
+    }
+  }
+  
+  static class StubConnectionHandler implements ConnectionHandler {
+    @Override
+    public void setReconnectionTime(Duration reconnectionTime) {
+    }
+
+    @Override
+    public void setLastEventId(String lastEventId) {
+    }    
   }
 }

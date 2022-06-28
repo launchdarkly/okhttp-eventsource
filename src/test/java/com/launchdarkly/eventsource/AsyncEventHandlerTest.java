@@ -4,8 +4,12 @@ import com.launchdarkly.eventsource.Stubs.LogItem;
 import com.launchdarkly.eventsource.Stubs.TestHandler;
 
 import org.junit.After;
+import org.junit.Assert;
 import org.junit.Test;
 
+import java.io.IOException;
+import java.io.Reader;
+import java.io.StringReader;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -154,5 +158,24 @@ public class AsyncEventHandlerTest {
     } finally {
       executor.shutdown();
     }
+  }
+  
+  @Test
+  public void streamingMessageIsClosedAfterDispatch() {
+    Reader r = new StringReader("hello");
+    MessageEvent event1 = new MessageEvent("message", r, null, null);
+    MessageEvent event2 = new MessageEvent("other");
+    
+    asyncHandler.onMessage("message", event1);
+    asyncHandler.onMessage("message", event2);
+    
+    assertEquals(LogItem.event("message", "<streaming>"), eventHandler.awaitLogItem());
+    assertEquals(LogItem.event("message", "other"), eventHandler.awaitLogItem());
+    
+    // Now that the second one has been received, we know for sure that the handler for the first one returned
+    try {
+      r.read();
+      Assert.fail("expected exception, reader should have been closed");
+    } catch (IOException e) {}
   }
 }

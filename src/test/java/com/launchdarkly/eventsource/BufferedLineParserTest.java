@@ -9,16 +9,18 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.Charset;
 
+import static com.launchdarkly.eventsource.Helpers.UTF8;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.contains;
 
 @SuppressWarnings("javadoc")
 @RunWith(Parameterized.class)
-public class BufferedUtf8LineReaderTest {
+public class BufferedLineParserTest {
   // This test uses many permutations of how long the input lines are, how long are
   // the chunks that are returned by each read of the (fake) stream, how big the
   // read buffer is, and what the line terminators are, with a mix of single-byte
@@ -42,7 +44,7 @@ public class BufferedUtf8LineReaderTest {
     return ret.build();
   }
   
-  public BufferedUtf8LineReaderTest(int chunkSize, String lineEnd, String description) {
+  public BufferedLineParserTest(int chunkSize, String lineEnd, String description) {
     this.chunkSize = chunkSize;
     this.lineEnd = lineEnd;
   }
@@ -89,15 +91,20 @@ public class BufferedUtf8LineReaderTest {
             : Splitter.fixedLength(chunkSize).split(Joiner.on("").join(linesWithEnds));
     
     InputStream input = new FakeInputStream(chunks);
-    BufferedUtf8LineReader r = new BufferedUtf8LineReader(input, bufferSize);
+    BufferedLineParser p = new BufferedLineParser(input, bufferSize);
     
     ImmutableList.Builder<String> received = ImmutableList.builder();
+    ByteArrayOutputStream buf = new ByteArrayOutputStream();
     while (true) {
-      String line = r.readLine();
-      if (line == null) {
+      boolean haveLine = p.read();
+      buf.write(p.getBuffer(), p.getChunkOffset(), p.getChunkSize());
+      if (haveLine) {
+        String line = buf.toString(UTF8.name());
+        received.add(line);
+        buf.reset();
+      } else if (p.isEof()) {
         break;
       }
-      received.add(line);
     }
     ImmutableList<String> actualLines = received.build();
     assertThat(actualLines, contains(Iterables.toArray(lines, String.class)));

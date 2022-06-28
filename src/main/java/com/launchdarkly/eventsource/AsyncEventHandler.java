@@ -13,7 +13,7 @@ import java.util.concurrent.Semaphore;
  * <p>
  * This class guarantees that runtime exceptions are never thrown back to the EventSource. 
  */
-class AsyncEventHandler implements EventHandler {
+final class AsyncEventHandler implements EventHandler {
   private final Executor executor;
   private final EventHandler eventSourceHandler;
   private final Logger logger;
@@ -62,6 +62,8 @@ class AsyncEventHandler implements EventHandler {
         eventSourceHandler.onMessage(event, messageEvent);
       } catch (Exception e) {
         handleUnexpectedError(e);
+      } finally {
+        messageEvent.close();
       }
     });
   }

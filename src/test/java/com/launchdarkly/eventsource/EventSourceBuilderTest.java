@@ -25,6 +25,7 @@ import static org.hamcrest.Matchers.lessThanOrEqualTo;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.mock;
 
@@ -397,6 +398,13 @@ public class EventSourceBuilderTest {
   public void eventThreadWorkQueueCapacity() {
     try (EventSource es = builder.maxEventTasksInFlight(8).build()) {
       assertEquals(8, es.handler.semaphore.availablePermits());
+    }
+  }
+  
+  @Test
+  public void streamingData() {
+    try (EventSource es = builder.streamEventData(true).build()) {
+      assertTrue(es.streamEventData);
     }
   }
 }

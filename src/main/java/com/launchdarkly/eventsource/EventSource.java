@@ -45,8 +45,20 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 /**
- * Client for <a href="https://www.w3.org/TR/2015/REC-eventsource-20150203/">Server-Sent Events</a>
- * aka EventSource
+ * A client for the <a href="https://html.spec.whatwg.org/multipage/server-sent-events.html#server-sent-events">Server-Sent
+ * Events</a> (SSE) protocol.
+ * <p>
+ * Instances are always configured and constructed with {@link Builder}. The client is created in
+ * an inactive state and will not connect until you call {@link #start()}.
+ * <p>
+ * Note that although {@code EventSource} is named after the JavaScript API that is described in
+ * the SSE specification, its behavior is not identical to standard web browser implementations of
+ * EventSource, specifically in terms of failure/reconnection behavior: it will automatically
+ * retry (with a backoff delay) for some error conditions where a browser will not retry. It also
+ * supports request configuration options (such as request headers and method) that the browser
+ * EventSource does not support. However, its interpretation of the stream data is fully conformant
+ * with the SSE specification, unless you use the opt-in mode {@link Builder#streamEventData(boolean)}
+ * which allows for greater efficiency in some use cases but has some behavioral constraints.
  */
 public class EventSource implements Closeable {
   final Logger logger; // visible for tests
@@ -98,6 +110,7 @@ public class EventSource implements Closeable {
   private volatile String lastEventId;
   final AsyncEventHandler handler; // visible for tests
   private final ConnectionErrorHandler connectionErrorHandler;
+  final boolean streamEventData; // visible for tests
   private final AtomicReference<ReadyState> readyState;
   private final OkHttpClient client;
   private volatile Call call;
@@ -121,6 +134,7 @@ public class EventSource implements Closeable {
     this.reconnectTime = builder.reconnectTime;
     this.maxReconnectTime = builder.maxReconnectTime;
     this.backoffResetThreshold = builder.backoffResetThreshold;
+    this.streamEventData = builder.streamEventData;
     ThreadFactory eventsThreadFactory = createThreadFactory("okhttp-eventsource-events", builder.threadPriority);
     this.eventExecutor = Executors.newSingleThreadExecutor(eventsThreadFactory);
     ThreadFactory streamThreadFactory = createThreadFactory("okhttp-eventsource-stream", builder.threadPriority);
@@ -406,14 +420,19 @@ public class EventSource implements Closeable {
     logger.info("Connected to EventSource stream.");
     handler.onOpen();
     
-    BufferedUtf8LineReader lineReader = new BufferedUtf8LineReader(
-        response.body().byteStream(), readBufferSize);
-    EventParser parser = new EventParser(url.uri(), handler, connectionHandler, logger);
+    EventParser parser = new EventParser(
+        response.body().byteStream(),
+        url.uri(),
+        handler,
+        connectionHandler,
+        readBufferSize,
+        streamEventData,
+        logger
+        );
     
     // COVERAGE: the isInterrupted() condition is not encountered in unit tests and it's unclear if it can ever happen
-    for (String line; !Thread.currentThread().isInterrupted() &&
-          (line = lineReader.readLine()) != null; ) {
-      parser.line(line);
+    while (!Thread.currentThread().isInterrupted() && !parser.isEof()) {
+      parser.processStream();
     }
   }
   
@@ -553,6 +572,7 @@ public class EventSource implements Closeable {
     private Logger logger = null;
     private String loggerBaseName = null;
     private int maxEventTasksInFlight = 0;
+    private boolean streamEventData;
     
     /**
      * Creates a new builder.
@@ -881,7 +901,7 @@ public class EventSource implements Closeable {
      * than {@link EventSource#DEFAULT_READ_BUFFER_SIZE}, it can specify a larger buffer size
      * to avoid unnecessary heap allocations.
      * 
-     * @param readBufferSize
+     * @param readBufferSize the buffer size
      * @return the builder
      * @throws IllegalArgumentException if the size is less than or equal to zero
      * @see EventSource#DEFAULT_READ_BUFFER_SIZE
@@ -938,6 +958,48 @@ public class EventSource implements Closeable {
      */
     public Builder maxEventTasksInFlight(int maxEventTasksInFlight) {
       this.maxEventTasksInFlight = maxEventTasksInFlight;
+      return this;
+    }
+    
+    /**
+     * Specifies whether EventSource should send a {@link MessageEvent} to the handler as soon as it receives the
+     * beginning of the event data, allowing the handler to read the data incrementally with
+     * {@link MessageEvent#getDataReader()}.
+     * <p>
+     * The default for this property is {@code false}, meaning that EventSource will always read the entire event into
+     * memory before dispatching it to the handler.
+     * <p>
+     * If you set it to {@code true}, it will instead call the handler as soon as it sees a {@code data} field--
+     * setting {@link MessageEvent#getDataReader()} to a {@link java.io.Reader} that reads directly from the data as
+     * it arrives. The EventSource will perform any necessary parsing under the covers, so that for instance if there
+     * are multiple {@code data:} lines in the event, the {@link java.io.Reader} will emit a newline character between
+     * each and will not see the "data:" field names. The {@link java.io.Reader} will report "end of stream" as soon
+     * as the event is terminated normally by a blank line.
+     * <p>
+     * This mode is designed for applications that expect very large data items to be delivered over SSE. Use it
+     * with caution, since there are several limitations:
+     * <ul>
+     * <li> EventSource cannot continue processing further events on the stream until the handler's
+     * {@link EventHandler#onMessage(String, MessageEvent)} method has returned. </li>
+     * <li> The {@link MessageEvent} is constructed as soon as a {@code data:} field appears, so it will only include
+     * fields that appeared <i>before</i> {@code data:}. In other words, if the SSE server happens to send {@code data:}
+     * first and {@code event:} second, {@link MessageEvent#getEventName()} will <i>not</i> contain the value of
+     * {@code event:} but will be {@link MessageEvent#DEFAULT_EVENT_NAME} instead; similarly, an {@code id:} field will
+     * be ignored if it appears after {@code data:} in this mode. Therefore, you should only use this mode if the
+     * server's behavior is predictable in this regard.</li>  
+     * <li> The SSE protocol specifies that an event should be processed only if it is terminated by a blank line, but
+     * in this mode the handler will receive the event as soon as a {@code data:} field appears-- so, if the stream
+     * happens to cut off abnormally without a trailing blank line, technically you will be receiving an incomplete
+     * event that should have been ignored. </li>
+     * </ul>  
+     * 
+     * @param streamEventData true if events should be dispatched immediately with asynchronous data rather than
+     *   read fully before dispatch 
+     * @return the builder
+     * @since 2.6.0
+     */
+    public Builder streamEventData(boolean streamEventData) {
+      this.streamEventData = streamEventData;
       return this;
     }
 

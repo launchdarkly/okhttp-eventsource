@@ -12,7 +12,7 @@ import java.io.StringWriter;
  * where the source of the exception can be clearly indicated by the log message, we should
  * not log stacktraces.
  */
-class LazyStackTrace {
+final class LazyStackTrace {
   private final Throwable throwable;
   
   LazyStackTrace(Throwable throwable) {

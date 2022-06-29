@@ -11,8 +11,10 @@ import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -110,7 +112,8 @@ public class EventSource implements Closeable {
   private volatile String lastEventId;
   final AsyncEventHandler handler; // visible for tests
   private final ConnectionErrorHandler connectionErrorHandler;
-  final boolean streamEventData; // visible for tests
+  final boolean streamEventData;   // visible for tests
+  final Set<String> expectFields;  // visible for tests
   private final AtomicReference<ReadyState> readyState;
   private final OkHttpClient client;
   private volatile Call call;
@@ -135,6 +138,8 @@ public class EventSource implements Closeable {
     this.maxReconnectTime = builder.maxReconnectTime;
     this.backoffResetThreshold = builder.backoffResetThreshold;
     this.streamEventData = builder.streamEventData;
+    this.expectFields = builder.expectFields;
+    
     ThreadFactory eventsThreadFactory = createThreadFactory("okhttp-eventsource-events", builder.threadPriority);
     this.eventExecutor = Executors.newSingleThreadExecutor(eventsThreadFactory);
     ThreadFactory streamThreadFactory = createThreadFactory("okhttp-eventsource-stream", builder.threadPriority);
@@ -427,6 +432,7 @@ public class EventSource implements Closeable {
         connectionHandler,
         readBufferSize,
         streamEventData,
+        expectFields,
         logger
         );
     
@@ -573,6 +579,7 @@ public class EventSource implements Closeable {
     private String loggerBaseName = null;
     private int maxEventTasksInFlight = 0;
     private boolean streamEventData;
+    private Set<String> expectFields = null;
     
     /**
      * Creates a new builder.
@@ -996,6 +1003,7 @@ public class EventSource implements Closeable {
      * @param streamEventData true if events should be dispatched immediately with asynchronous data rather than
      *   read fully before dispatch 
      * @return the builder
+     * @see #expectFields(String...)
      * @since 2.6.0
      */
     public Builder streamEventData(boolean streamEventData) {
@@ -1003,6 +1011,49 @@ public class EventSource implements Closeable {
       return this;
     }
 
+    /**
+     * Specifies that the application expects the server to send certain fields in every event.
+     * <p>
+     * This setting makes no difference unless you have enabled {@link #streamEventData(boolean)} mode. In that case,
+     * it causes EventSource to only use the streaming data mode for an event <i>if</i> the specified fields have
+     * already been received; otherwise, it will buffer the whole event (as if {@link #streamEventData(boolean)} had
+     * not been enabled), to ensure that those fields are not lost if they appear after the {@code data:} field.
+     * <p>
+     * For instance, if you had called {@code expectFields("event")}, then EventSource would be able to use streaming
+     * data mode for the following SSE response--
+     * <pre><code>
+     *     event: hello
+     *     data: here is some very long streaming data
+     * </code></pre>
+     * <p>
+     * --but it would buffer the full event if the server used the opposite order:
+     * <pre><code>
+     *     data: here is some very long streaming data
+     *     event: hello
+     * </code></pre>
+     * <p>
+     * Such behavior is not automatic because in some applications, there might never be an {@code event:} field,
+     * and EventSource has no way to anticipate this.
+     * 
+     * @param fieldNames a list of SSE field names (case-sensitive; any names other than "event" and "id" are ignored)
+     * @return the builder
+     * @see #streamEventData(boolean)
+     * @since 2.6.0
+     */
+    public Builder expectFields(String... fieldNames) {
+      if (fieldNames == null || fieldNames.length == 0) {
+        expectFields = null;
+      } else {
+        expectFields = new HashSet<>();
+        for (String f: fieldNames) {
+          if (f != null) {
+            expectFields.add(f);
+          }
+        }
+      }
+      return this;
+    }
+    
     /**
      * Constructs an {@link EventSource} using the builder's current properties.
      * @return the new EventSource instance

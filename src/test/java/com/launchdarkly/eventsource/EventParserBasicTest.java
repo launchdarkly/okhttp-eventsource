@@ -49,6 +49,7 @@ public class EventParserBasicTest {
         connectionHandler,
         BUFFER_SIZE,
         false,
+        null,
         testLogger
         );
   }

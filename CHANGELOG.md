@@ -2,6 +2,10 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [2.6.1] - 2022-06-29
+### Fixed:
+- The 2.5.0 and 2.6.0 releases mistakenly showed `kotlin-stdlib` as a compile-time dependency in `pom.xml`. While this library does use the Kotlin runtime (because the underlying OkHttp client uses Kotlin), that is a transitive dependency and is not needed at compile time.
+
 ## [2.6.0] - 2022-06-28
 ### Added:
 - `EventSource.Builder.streamEventData` and `EventSource.Builder.expectFields`, for enabling a new event parsing mode in which event data can be consumed directly from the stream without holding it all in memory. This may be useful in applications where individual events are extremely large.

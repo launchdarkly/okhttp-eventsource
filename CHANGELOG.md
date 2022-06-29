@@ -2,6 +2,15 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [2.6.0] - 2022-06-28
+### Added:
+- `EventSource.Builder.streamEventData` and `EventSource.Builder.expectFields`, for enabling a new event parsing mode in which event data can be consumed directly from the stream without holding it all in memory. This may be useful in applications where individual events are extremely large.
+- `MessageEvent.getDataReader` and `MessageEvent.isStreamingData`, for use with the new mode described above.
+- `MessageEvent.getEventName`, providing access to the event name from the event object; previously the event name was only available as a parameter of `EventHandler.onMessage`.
+
+### Changed:
+- Miscellaneous improvements in memory usage and performance when parsing the stream, even in the default mode.
+
 ## [2.5.0] - 2022-01-13
 ### Added:
 - `EventSource.Builder.maxTasksInFlight` allows setting a limit on how many asynchronous event handler calls can be queued for dispatch at any given time. (Thanks, [thomaslee](https://github.com/launchdarkly/okhttp-eventsource/pull/58)!)

@@ -10,6 +10,8 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.Reader;
 import java.net.URI;
+import java.util.HashSet;
+import java.util.Set;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
@@ -94,9 +96,62 @@ public class EventParserDataStreamingTest {
     assertThat(e.getLastEventId(), nullValue());
   
     sink.assertNoMoreEvents();
-}
+  }
+  
+  @Test
+  public void canRequireEventName() throws Exception {
+    String streamData = "data: line1\nevent: hello\nid: id1\n\n" +
+        "event: world\ndata: line2\nid: id2\n\n";
+    MessageSink sink = new MessageSink();
+    startParser(streamData, 100, sink, "event");
 
-  private void startParser(String streamData, int bufferSize, MessageSink sink) {
+    MessageEvent e1 = sink.awaitEvent();
+    assertThat(e1.isStreamingData(), is(false));
+    assertThat(readFully(e1.getDataReader()), equalTo("line1"));
+    assertThat(e1.getEventName(), equalTo("hello"));
+    assertThat(e1.getLastEventId(), equalTo("id1"));
+
+    MessageEvent e2 = sink.awaitEvent();
+    assertThat(e2.isStreamingData(), is(true));
+    assertThat(readFully(e2.getDataReader()), equalTo("line2"));
+    assertThat(e2.getEventName(), equalTo("world"));
+    assertThat(e2.getLastEventId(), equalTo("id1")); // "id: id2" was ignored because it came after "data:"
+  
+    sink.assertNoMoreEvents();
+  }
+
+  @Test
+  public void canRequireEventId() throws Exception {
+    String streamData = "data: line1\nevent: hello\nid: id1\n\n" +
+        "id: id2\ndata: line2\nevent: world\n\n";
+    MessageSink sink = new MessageSink();
+    startParser(streamData, 100, sink, "id");
+
+    MessageEvent e1 = sink.awaitEvent();
+    assertThat(e1.isStreamingData(), is(false));
+    assertThat(readFully(e1.getDataReader()), equalTo("line1"));
+    assertThat(e1.getEventName(), equalTo("hello"));
+    assertThat(e1.getLastEventId(), equalTo("id1"));
+
+    MessageEvent e2 = sink.awaitEvent();
+    assertThat(e2.isStreamingData(), is(true));
+    assertThat(readFully(e2.getDataReader()), equalTo("line2"));
+    assertThat(e2.getEventName(), equalTo(MessageEvent.DEFAULT_EVENT_NAME));
+    assertThat(e2.getLastEventId(), equalTo("id2"));
+  
+    sink.assertNoMoreEvents();
+  }
+
+  private void startParser(String streamData, int bufferSize, MessageSink sink, String... expectFieldNames) {
+    final Set<String> expectFields;
+    if (expectFieldNames != null && expectFieldNames.length != 0) {
+      expectFields = new HashSet<>();
+      for (String f: expectFieldNames) {
+        expectFields.add(f);
+      }
+    } else {
+      expectFields = null;
+    }
     new Thread(() -> {
       EventParser parser = new EventParser(
           new ByteArrayInputStream(streamData.getBytes()),
@@ -105,6 +160,7 @@ public class EventParserDataStreamingTest {
           new StubConnectionHandler(),
           bufferSize,
           true,
+          expectFields,
           testLogger.getLogger()
           );
       while (!parser.isEof()) {

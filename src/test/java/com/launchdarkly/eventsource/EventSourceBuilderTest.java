@@ -1,5 +1,7 @@
 package com.launchdarkly.eventsource;
 
+import com.google.common.collect.ImmutableSet;
+
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -12,6 +14,7 @@ import java.net.URI;
 import java.nio.charset.Charset;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 import static com.launchdarkly.eventsource.EventSource.DEFAULT_BACKOFF_RESET_THRESHOLD;
@@ -405,6 +408,17 @@ public class EventSourceBuilderTest {
   public void streamingData() {
     try (EventSource es = builder.streamEventData(true).build()) {
       assertTrue(es.streamEventData);
+    }
+  }
+  
+  @Test
+  public void expectFields() {
+    try (EventSource es = builder
+        .expectFields("a")
+        .expectFields() // should overwrite previous setting
+        .expectFields("b", "c") // should overwrite previous setting
+        .build()) {
+      assertEquals(ImmutableSet.of("b", "c"), es.expectFields);
     }
   }
 }

@@ -9,6 +9,7 @@ import java.io.PipedOutputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.time.Duration;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import static com.launchdarkly.eventsource.Helpers.UTF8;
@@ -32,6 +33,7 @@ final class EventParser {
   private final EventHandler handler;
   private final ConnectionHandler connectionHandler;
   private final boolean streamEventData;
+  private Set<String> expectFields;
   private final Logger logger;
   private final URI origin;
 
@@ -56,6 +58,7 @@ final class EventParser {
       ConnectionHandler connectionHandler,
       int readBufferSize,
       boolean streamEventData,
+      Set<String> expectFields,
       Logger logger
       ) {
     this.lineParser = new BufferedLineParser(inputStream,
@@ -64,9 +67,10 @@ final class EventParser {
     this.origin = origin;
     this.connectionHandler = connectionHandler;
     this.streamEventData = streamEventData;
+    this.expectFields = expectFields;
     this.logger = logger;
     
-    dataBuffer = streamEventData ? null : new ByteArrayOutputStream(VALUE_BUFFER_INITIAL_CAPACITY);
+    dataBuffer = new ByteArrayOutputStream(VALUE_BUFFER_INITIAL_CAPACITY);
   }
 
   /**
@@ -153,7 +157,7 @@ final class EventParser {
         } catch (IOException e) {} // ignore error if the pipe has been closed by the reader
       } else {
         // We have not already started streaming data for this event. Should we?
-        if (streamEventData) {
+        if (canStreamEventDataNow()) {
           // Yes. Create a pipe and send a lazy event.
           writingDataStream = new PipedOutputStream();
           InputStream pipedInputStream = new PipedInputStream(writingDataStream);
@@ -233,6 +237,21 @@ final class EventParser {
     return true;
   }
 
+  private boolean canStreamEventDataNow() {
+    if (!streamEventData) {
+      return false;
+    }
+    if (expectFields != null) {
+      if (expectFields.contains(EVENT) && eventName == null) {
+        return false;
+      }
+      if (expectFields.contains(ID) && lastEventId == null) {
+        return false;
+      }
+    }
+    return true;
+  }
+  
   private void processComment(String comment) {
     try {
       handler.onComment(comment);
@@ -286,7 +305,7 @@ final class EventParser {
     dataLineEnded = false;
     eventName = null;
     resetValueBuffer();
-    if (dataBuffer != null) {
+    if (dataBuffer.size() != 0) {
       if (dataBuffer.size() > VALUE_BUFFER_INITIAL_CAPACITY) {
         dataBuffer = new ByteArrayOutputStream(VALUE_BUFFER_INITIAL_CAPACITY); // don't want it to grow indefinitely
       } else {

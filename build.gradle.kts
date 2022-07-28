@@ -60,7 +60,7 @@ java {
 }
 
 object Versions {
-    const val okhttp = "4.5.0"
+    const val okhttp = "4.9.3"
     const val slf4j = "1.7.22"
 }
 

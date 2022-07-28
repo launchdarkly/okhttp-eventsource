@@ -2,6 +2,10 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [2.6.2] - 2022-07-27
+### Changed:
+- Updated OkHttp dependency to v4.9.3 to get [recent fixes](https://square.github.io/okhttp/changelogs/changelog_4x/), including a security fix.
+
 ## [2.6.1] - 2022-06-29
 ### Fixed:
 - The 2.5.0 and 2.6.0 releases mistakenly showed `kotlin-stdlib` as a compile-time dependency in `pom.xml`. While this library does use the Kotlin runtime (because the underlying OkHttp client uses Kotlin), that is a transitive dependency and is not needed at compile time.

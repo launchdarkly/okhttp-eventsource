@@ -1,6 +1,7 @@
 import java.time.Duration
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.external.javadoc.CoreJavadocOptions
+import org.gradle.external.javadoc.StandardJavadocDocletOptions
 
 // These values come from gradle.properties
 val ossrhUsername: String by project
@@ -94,6 +95,14 @@ tasks.javadoc.configure {
     // See JDK-8200363 (https://bugs.openjdk.java.net/browse/JDK-8200363)
     // for information about the -Xwerror option.
     (options as CoreJavadocOptions).addStringOption("Xwerror")
+
+    // The following should allow hyperlinks to com.launchdarkly.logging classes to go to
+    // the correct external URLs
+    if (options is StandardJavadocDocletOptions) {
+        (options as StandardJavadocDocletOptions).links(
+            "https://javadoc.io/doc/com.launchdarkly/launchdarkly-logging/${Versions.launchdarklyLogging}"
+        )
+    }
 }
 
 tasks.test.configure {

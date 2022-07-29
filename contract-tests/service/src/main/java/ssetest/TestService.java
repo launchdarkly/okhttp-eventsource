@@ -1,6 +1,7 @@
 package ssetest;
 
 import com.google.gson.Gson;
+import com.launchdarkly.logging.*;
 import com.launchdarkly.testhelpers.httptest.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -15,14 +16,12 @@ public class TestService {
   
   final Gson gson = new Gson();
   final OkHttpClient client = new OkHttpClient();
+  final LDLogAdapter logAdapter = Logs.toStream(System.out);
 
   private final Map<String, StreamEntity> streams = new ConcurrentHashMap<String, StreamEntity>();
   private final AtomicInteger streamCounter = new AtomicInteger(0);
   
   public static void main(String[] args) {
-    // ((ch.qos.logback.classic.Logger)LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME)).setLevel(
-    //     Level.valueOf(config.logLevel.toUpperCase()));
-
     TestService service = new TestService();
 
     SimpleRouter router = new SimpleRouter()
@@ -61,7 +60,7 @@ public class TestService {
     StreamOptions opts = readJson(ctx, StreamOptions.class);
 
     String streamId = String.valueOf(streamCounter.incrementAndGet());
-    StreamEntity stream = new StreamEntity(this, streamId, opts);
+    StreamEntity stream = new StreamEntity(this, streamId, opts, logAdapter);
 
     streams.put(streamId, stream);
     

@@ -2,9 +2,11 @@ package com.launchdarkly.eventsource;
 
 import com.launchdarkly.eventsource.Stubs.LogItem;
 import com.launchdarkly.eventsource.Stubs.TestHandler;
+import com.launchdarkly.logging.LDLogLevel;
 
 import org.junit.After;
 import org.junit.Assert;
+import org.junit.Rule;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -21,24 +23,21 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.anyString;
-import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.timeout;
-import static org.mockito.Mockito.verify;
 
 @SuppressWarnings("javadoc")
 public class AsyncEventHandlerTest {
   private final ExecutorService executor;
   private final TestHandler eventHandler;
   private final AsyncEventHandler asyncHandler;
-  private final Logger logger;
+
+  @Rule public TestScopedLoggerRule testLoggerRule = new TestScopedLoggerRule();
   
   public AsyncEventHandlerTest() {
     executor = Executors.newSingleThreadExecutor();
     eventHandler = new TestHandler();
-    logger = mock(Logger.class);
-    asyncHandler = new AsyncEventHandler(executor, eventHandler, logger, null);
+    asyncHandler = new AsyncEventHandler(executor, eventHandler, testLoggerRule.getLogger(), null);
   }
   
   @After
@@ -47,8 +46,8 @@ public class AsyncEventHandlerTest {
   }
   
   private void verifyErrorLogged(Throwable t) {
-    verify(logger, timeout(1000)).warn("Caught unexpected error from EventHandler: " + t);
-    verify(logger, timeout(1000)).debug(eq("Stack trace: {}"), any(LazyStackTrace.class));
+    testLoggerRule.awaitMessageContaining(LDLogLevel.WARN, "Caught unexpected error from EventHandler: " + t);
+    testLoggerRule.awaitMessageContaining(LDLogLevel.DEBUG, "Stack trace:");
   }
   
   @Test
@@ -113,9 +112,10 @@ public class AsyncEventHandlerTest {
     assertEquals(LogItem.opened(), eventHandler.awaitLogItem());
     assertEquals(LogItem.error(err1), eventHandler.awaitLogItem());
     
-    verify(logger, timeout(1000)).warn("Caught unexpected error from EventHandler: " + err1);
-    verify(logger, timeout(1000)).warn("Caught unexpected error from EventHandler.onError(): " + err2);
-    verify(logger, timeout(1000).times(2)).debug(eq("Stack trace: {}"), any(LazyStackTrace.class));
+    testLoggerRule.awaitMessageContaining(LDLogLevel.WARN, "Caught unexpected error from EventHandler: " + err1);
+    testLoggerRule.awaitMessageContaining(LDLogLevel.DEBUG, "Stack trace:");
+    testLoggerRule.awaitMessageContaining(LDLogLevel.WARN, "Caught unexpected error from EventHandler.onError(): " + err2);
+    testLoggerRule.awaitMessageContaining(LDLogLevel.DEBUG, "Stack trace:");
   }
 
   @Test
@@ -134,7 +134,7 @@ public class AsyncEventHandlerTest {
       ExecutorService blockable = Executors.newSingleThreadExecutor();
       try {
         blockable.execute(() -> {
-          AsyncEventHandler asyncHandler = new AsyncEventHandler(executor, eventHandler, logger, new Semaphore(1));
+          AsyncEventHandler asyncHandler = new AsyncEventHandler(executor, eventHandler, testLoggerRule.getLogger(), new Semaphore(1));
 
           asyncHandler.onOpen();
 

@@ -1,6 +1,7 @@
 package ssetest;
 
 import com.launchdarkly.eventsource.*;
+import com.launchdarkly.logging.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.net.URI;
@@ -16,19 +17,19 @@ public class StreamEntity implements EventHandler {
   private final EventSource stream;
   private final StreamOptions options;
   private final AtomicInteger callbackMessageCounter = new AtomicInteger(0);
-  private final Logger logger;
+  private final LDLogger logger;
   private volatile boolean closed;
   
-  public StreamEntity(TestService owner, String id, StreamOptions options) {
+  public StreamEntity(TestService owner, String id, StreamOptions options, LDLogAdapter logAdapter) {
     this.owner = owner;
     this.id = id;
     this.options = options;
 
-    this.logger = LoggerFactory.getLogger(options.tag);
+    this.logger = LDLogger.withAdapter(logAdapter, options.tag);
     logger.info("Opening stream to {}", options.streamUrl);
 
     EventSource.Builder eb = new EventSource.Builder(this, URI.create(options.streamUrl))
-      .loggerBaseName(options.tag + ".stream");
+      .logger(logger.subLogger("stream"));
     if (options.headers != null) {
       Headers.Builder hb = new Headers.Builder();
       for (String name: options.headers.keySet()) {

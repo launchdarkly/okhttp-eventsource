@@ -60,14 +60,18 @@ java {
 }
 
 object Versions {
+    const val launchdarklyLogging = "1.1.0"
     const val okhttp = "4.9.3"
     const val slf4j = "1.7.22"
 }
 
 dependencies {
+    api("com.launchdarkly:launchdarkly-logging:${Versions.launchdarklyLogging}")
     api("com.squareup.okhttp3:okhttp:${Versions.okhttp}")
     api("org.slf4j:slf4j-api:${Versions.slf4j}")
-    testImplementation("ch.qos.logback:logback-classic:1.1.9")
+    // SLF4J is no longer referenced directly by okhttp-eventsource, but since the default behavior is
+    // to use the SLF4J adapter from com.launchdarkly.logging, we are still retaining the dependency
+    // here to make sure it is in the classpath.
     testImplementation("org.mockito:mockito-core:1.10.19")
     testImplementation("com.launchdarkly:test-helpers:1.0.0")
     testImplementation("com.google.guava:guava:30.1-jre")

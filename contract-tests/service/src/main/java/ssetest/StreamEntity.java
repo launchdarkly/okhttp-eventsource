@@ -2,8 +2,6 @@ package ssetest;
 
 import com.launchdarkly.eventsource.*;
 import com.launchdarkly.logging.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import java.net.URI;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;

@@ -61,7 +61,7 @@ java {
 }
 
 object Versions {
-    const val launchdarklyLogging = "1.1.0"
+    const val launchdarklyLogging = "1.1.1"
     const val okhttp = "4.9.3"
 }
 

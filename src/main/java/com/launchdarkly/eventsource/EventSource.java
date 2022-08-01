@@ -1,7 +1,6 @@
 package com.launchdarkly.eventsource;
 
 import com.launchdarkly.logging.LDLogger;
-import com.launchdarkly.logging.LDSLF4J;
 
 import java.io.Closeable;
 import java.io.EOFException;
@@ -124,13 +123,7 @@ public class EventSource implements Closeable {
 
   EventSource(Builder builder) {
     this.name = builder.name == null ? "" : builder.name;
-    if (builder.logger == null) {
-      String loggerName = (builder.loggerBaseName == null ? EventSource.class.getCanonicalName() : builder.loggerBaseName) +
-          (name.isEmpty() ? "" : ("." + name));
-      this.logger = LDLogger.withAdapter(LDSLF4J.adapter(), loggerName);
-    } else {
-      this.logger = builder.logger;
-    }
+    this.logger = builder.logger == null ? LDLogger.none() : builder.logger;
     this.url = builder.url;
     this.headers = addDefaultHeaders(builder.headers);
     this.method = builder.method;
@@ -579,7 +572,6 @@ public class EventSource implements Closeable {
     private OkHttpClient.Builder clientBuilder;
     private int readBufferSize = DEFAULT_READ_BUFFER_SIZE;
     private LDLogger logger = null;
-    private String loggerBaseName = null;
     private int maxEventTasksInFlight = 0;
     private boolean streamEventData;
     private Set<String> expectFields = null;
@@ -670,11 +662,8 @@ public class EventSource implements Closeable {
     }
     
     /**
-     * Set the name for this EventSource client to be used when naming thread pools (and, possibly, the logger).
+     * Set the name for this EventSource client to be used when naming thread pools.
      * This is mainly useful when multiple EventSource clients exist within the same process.
-     * <p>
-     * The name only affects logging when using the default SLF4J integration; if you have specified a custom
-     * {@link #logger(LDLogger)}, the logging facade has its own way to specify a logger name. 
      *
      * @param name the name (without any whitespaces)
      * @return the builder
@@ -928,28 +917,6 @@ public class EventSource implements Closeable {
     /**
      * Specifies a custom logger to receive EventSource logging.
      * <p>
-     * This has been superseded by {@link #logger(LDLogger)}. The
-     * <a href="https://github.com/launchdarkly/java-logging">com.launchdarkly.logging</a>
-     * facade used by that method provides many options for customizing logging behavior.
-     * The {@link Logger} interface defined by {@code okhttp-eventsource} will be removed
-     * in a future major version release.
-     * <p>
-     * If you do not provide a logger, the default is to send log output to SLF4J.
-     * 
-     * @param logger a {@link Logger} implementation, or null to use the default (SLF4J)
-     * @return the builder
-     * @since 2.3.0
-     * @deprecated use {@link #logger(LDLogger)}
-     */
-    @Deprecated
-    public Builder logger(Logger logger) {
-      this.logger = logger == null ? null : LoggerBridge.wrapLogger(logger);
-      return this;
-    }
-
-    /**
-     * Specifies a custom logger to receive EventSource logging.
-     * <p>
      * This method uses the {@link LDLogger} type from
      * <a href="https://github.com/launchdarkly/java-logging">com.launchdarkly.logging</a>, a
      * facade that provides several logging implementations as well as the option to forward
@@ -963,45 +930,14 @@ public class EventSource implements Closeable {
      *   );
      * </code></pre>
      * <p>
-     * If you do not provide a logger, the default is to send log output to SLF4J, and to use
-     * a logger name based on the {@link #loggerBaseName(String)} and {@link #name(String)}
-     * settings. In a future major version, the default behavior may be changed so that this
-     * library no longer has a mandatory dependency on SLF4J.
+     * If you do not provide a logger, the default is there is no log output.
      * 
-     * @param logger an {@link LDLogger} implementation, or null to use the default (SLF4J)
+     * @param logger an {@link LDLogger} implementation, or null for no logging
      * @return the builder
      * @since 2.7.0
      */
     public Builder logger(LDLogger logger) {
       this.logger = logger;
-      return this;
-    }
-
-    /**
-     * Specifies the base logger name to use for SLF4J logging.
-     * <p>
-     * The default is {@code com.launchdarkly.eventsource.EventSource}, plus any name suffix specified
-     * by {@link #name(String)}. If you instead use {@link #logger(Logger)} to specify some other log
-     * destination rather than SLF4J, this name is unused.
-     * <p>
-     * This method is now deprecated, because the logging facade used by {@link #logger(LDLogger)}
-     * makes it easy to set a logger name for SLF4J, as in this example:
-     * <pre><code>
-     *   // import com.launchdarkly.logging.*;
-     *   
-     *   builder.logger(
-     *      LDLogger.withAdapter(LDSLF4J.adapter(), "my.preferred.log.name") 
-     *   );
-     * </code></pre>
-     * 
-     * @param loggerBaseName the SLF4J logger name, or null to use the default
-     * @return the builder
-     * @since 2.3.0
-     * @deprecated use {@link #logger(LDLogger)}
-     */
-    @Deprecated
-    public Builder loggerBaseName(String loggerBaseName) {
-      this.loggerBaseName = loggerBaseName;
       return this;
     }
 

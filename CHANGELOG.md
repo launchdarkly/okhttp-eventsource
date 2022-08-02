@@ -2,6 +2,16 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [2.7.0] - 2022-08-02
+The main purpose of this release is to introduce a new logging facade, [`com.launchdarkly.logging`](https://github.com/launchdarkly/java-logging), to streamline how logging works in LaunchDarkly Java and Android code. Previously, `okhttp-eventsource` used SLF4J for logging by default, but could be made to send output to a `Logger` interface of its own; the LaunchDarkly Java SDK used only SLF4J, so developers needed to provide an SLF4J configuration externally; and the LaunchDarkly Android SDK used Timber, but still brought in SLF4J as a transitive dependency of `okhttp-eventsource`. In this release, the default behavior is still to use SLF4J, but the logging facade can also be configured programmatically to do simple console logging without SLF4J, or to forward output to another framework such as `java.util.logging`, or other destinations. In a future major version release, the default behavior will be changed so that `okhttp-eventsource` does not require SLF4J as a dependency.
+
+### Added:
+- An overload of `EventSource.Builder.logger()` that takes a `com.launchdarkly.logging.LDLogger` instead of a `com.launchdarkly.eventsource.Logger`.
+
+### Deprecated:
+- The overload of `EventSource.Builder.logger()` that takes a `com.launchdarkly.eventsource.Logger`.
+- `EventSource.Builder.loggerBaseName()`: this method was only relevant to the default behavior of using SLF4J, providing a way to customize what the logger name would be for SLF4J. But when using the new framework, the logger name is built into the `LDLogger` instance. For example (having imported the `com.launchdarkly.logging` package): `builder.logger(LDLogger.withAdapter(LDSLF4J.adapter(), "my.desired.logger.name"))`
+
 ## [2.6.2] - 2022-07-27
 ### Changed:
 - Updated OkHttp dependency to v4.9.3 to get [recent fixes](https://square.github.io/okhttp/changelogs/changelog_4x/), including a security fix.

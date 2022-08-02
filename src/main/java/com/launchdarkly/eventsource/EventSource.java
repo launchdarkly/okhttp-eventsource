@@ -185,7 +185,7 @@ public class EventSource implements Closeable {
       return;
     }
     logger.debug("readyState change: {} -> {}", RAW, CONNECTING);
-    logger.info("Starting EventSource client using URI: " + url);
+    logger.info("Starting EventSource client using URI: {}", url);
     streamExecutor.execute(this::run);
   }
   
@@ -340,7 +340,7 @@ public class EventSource implements Closeable {
     
     try {
       Duration sleepTime = backoffWithJitter(counter);
-      logger.info("Waiting " + sleepTime.toMillis() + " milliseconds before reconnecting...");
+      logger.info("Waiting {} milliseconds before reconnecting...", sleepTime.toMillis());
       Thread.sleep(sleepTime.toMillis());
     } catch (InterruptedException ignored) { // COVERAGE: no way to cause this in unit tests
     }

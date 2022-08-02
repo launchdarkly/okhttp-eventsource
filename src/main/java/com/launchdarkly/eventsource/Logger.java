@@ -1,12 +1,19 @@
 package com.launchdarkly.eventsource;
 
 /**
- * Interface for a custom logger that an application can provide to receive EventSource logging.
+ * Deprecated interface for a custom logger that an application can provide to receive EventSource logging.
+ * <p>
+ * This has been superseded by {@link EventSource.Builder#logger(com.launchdarkly.logging.LDLogger)},
+ * which uses the <a href="https://github.com/launchdarkly/java-logging">com.launchdarkly.logging</a>
+ * facade, providing many options for customizing logging behavior. The {@link Logger} interface
+ * defined by {@code okhttp-eventsource} will be removed in a future major version release
  * <p>
  * If you do not provide a logger, the default is to send log output to SLF4J.
  *
  * @since 2.3.0
+ * @deprecated use {@link EventSource.Builder#logger(com.launchdarkly.logging.LDLogger)}
  */
+@Deprecated
 public interface Logger {
   /**
    * Logs a debug message. Debug output includes verbose details that applications will normally

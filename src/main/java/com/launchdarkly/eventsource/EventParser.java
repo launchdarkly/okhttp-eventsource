@@ -1,5 +1,7 @@
 package com.launchdarkly.eventsource;
 
+import com.launchdarkly.logging.LDLogger;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -34,7 +36,7 @@ final class EventParser {
   private final ConnectionHandler connectionHandler;
   private final boolean streamEventData;
   private Set<String> expectFields;
-  private final Logger logger;
+  private final LDLogger logger;
   private final URI origin;
 
   private BufferedLineParser lineParser;
@@ -59,7 +61,7 @@ final class EventParser {
       int readBufferSize,
       boolean streamEventData,
       Set<String> expectFields,
-      Logger logger
+      LDLogger logger
       ) {
     this.lineParser = new BufferedLineParser(inputStream,
         readBufferSize < MIN_READ_BUFFER_SIZE ? MIN_READ_BUFFER_SIZE : readBufferSize);

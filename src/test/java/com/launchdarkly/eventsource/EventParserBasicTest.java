@@ -2,6 +2,7 @@ package com.launchdarkly.eventsource;
 
 import com.launchdarkly.eventsource.Stubs.LogItem;
 import com.launchdarkly.eventsource.Stubs.TestHandler;
+import com.launchdarkly.logging.LDLogLevel;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -30,15 +31,13 @@ public class EventParserBasicTest {
   private EventParser parser;
   private PipedOutputStream writeStream;
   private InputStream readStream;
-  private TestScopedLoggerRule.TestLogger testLogger;
   private int generatedStringCounter;
   
   @Rule public TestScopedLoggerRule testLoggerRule = new TestScopedLoggerRule();
   
   @Before
   public void setUp() throws Exception {
-    testLogger = testLoggerRule.getLogger();
-    testHandler = new TestHandler(testLogger);
+    testHandler = new TestHandler(testLoggerRule.getLogger());
     connectionHandler = mock(ConnectionHandler.class);
     writeStream = new PipedOutputStream();
     readStream = new PipedInputStream(writeStream);
@@ -50,7 +49,7 @@ public class EventParserBasicTest {
         BUFFER_SIZE,
         false,
         null,
-        testLogger
+        testLoggerRule.getLogger()
         );
   }
 
@@ -217,8 +216,8 @@ public class EventParserBasicTest {
     assertThat(testHandler.awaitLogItem(), equalTo(LogItem.event("message", "hello")));
     assertThat(testHandler.awaitLogItem(), equalTo(LogItem.error(err)));
     
-    testLogger.awaitMessageMatching("WARN: Message handler threw an exception: " + err.toString());
-    testLogger.awaitMessageMatching("DEBUG: Stack trace:");
+    testLoggerRule.awaitMessageContaining(LDLogLevel.WARN, "Message handler threw an exception: " + err.toString());
+    testLoggerRule.awaitMessageContaining(LDLogLevel.DEBUG, "Stack trace:");
   }
   
   @Test
@@ -231,8 +230,8 @@ public class EventParserBasicTest {
     assertThat(testHandler.awaitLogItem(), equalTo(LogItem.comment("hello")));
     assertThat(testHandler.awaitLogItem(), equalTo(LogItem.error(err)));
     
-    testLogger.awaitMessageMatching("WARN: Message handler threw an exception: " + err.toString());
-    testLogger.awaitMessageMatching("DEBUG: Stack trace:");
+    testLoggerRule.awaitMessageContaining(LDLogLevel.WARN, "Message handler threw an exception: " + err.toString());
+    testLoggerRule.awaitMessageContaining(LDLogLevel.DEBUG, "Stack trace:");
   }
   
   private String makeStringOfLength(int n) {

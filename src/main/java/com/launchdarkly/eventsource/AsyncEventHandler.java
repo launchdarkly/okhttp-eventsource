@@ -1,6 +1,8 @@
 package com.launchdarkly.eventsource;
 
 
+import com.launchdarkly.logging.LDLogger;
+
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
@@ -16,10 +18,10 @@ import java.util.concurrent.Semaphore;
 final class AsyncEventHandler implements EventHandler {
   private final Executor executor;
   private final EventHandler eventSourceHandler;
-  private final Logger logger;
+  private final LDLogger logger;
   final Semaphore semaphore; // visible for tests
 
-  AsyncEventHandler(Executor executor, EventHandler eventSourceHandler, Logger logger, Semaphore semaphore) {
+  AsyncEventHandler(Executor executor, EventHandler eventSourceHandler, LDLogger logger, Semaphore semaphore) {
     this.executor = executor;
     this.eventSourceHandler = eventSourceHandler;
     this.logger = logger;

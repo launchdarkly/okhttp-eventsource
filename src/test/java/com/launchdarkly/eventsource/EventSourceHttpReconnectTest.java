@@ -65,6 +65,7 @@ public class EventSourceHttpReconnectTest {
     try (HttpServer server = HttpServer.start(allRequests)) {      
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
           .reconnectTime(reconnectTime)
+          .logger(testLogger.getLogger())
           .build()) {
         es.start();
         

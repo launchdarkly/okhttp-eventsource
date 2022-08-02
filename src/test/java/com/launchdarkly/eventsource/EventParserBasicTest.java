@@ -13,7 +13,6 @@ import java.io.InputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.net.URI;
-import java.time.Duration;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
@@ -132,7 +131,7 @@ public class EventParserBasicTest {
         "");
 
     testHandler.awaitLogItem(); // the comment line has been processed
-    verify(connectionHandler).setReconnectionTime(Duration.ofMillis(7000));
+    verify(connectionHandler).setReconnectTimeMillis(7000);
   }
 
   @Test

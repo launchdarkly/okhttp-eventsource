@@ -1,6 +1,9 @@
 package com.launchdarkly.eventsource;
 
 import com.google.common.collect.ImmutableSet;
+import com.launchdarkly.logging.LDLogger;
+import com.launchdarkly.logging.LogCapture;
+import com.launchdarkly.logging.Logs;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -14,8 +17,8 @@ import java.net.URI;
 import java.nio.charset.Charset;
 import java.time.Duration;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static com.launchdarkly.eventsource.EventSource.DEFAULT_BACKOFF_RESET_THRESHOLD;
 import static com.launchdarkly.eventsource.EventSource.DEFAULT_CONNECT_TIMEOUT;
@@ -24,7 +27,9 @@ import static com.launchdarkly.eventsource.EventSource.DEFAULT_READ_TIMEOUT;
 import static com.launchdarkly.eventsource.EventSource.DEFAULT_RECONNECT_TIME;
 import static com.launchdarkly.eventsource.EventSource.DEFAULT_WRITE_TIMEOUT;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.iterableWithSize;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
+import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
@@ -343,50 +348,43 @@ public class EventSourceBuilderTest {
   }
   
   @Test
-  public void defaultLoggerWithDefaultLoggerName() {
+  public void hasDefaultLogger() {
     try (EventSource es = builder.build()) {
-      assertEquals(SLF4JLogger.class, es.logger.getClass());
-      assertEquals("com.launchdarkly.eventsource.EventSource", ((SLF4JLogger)es.logger).name);
+      assertThat(es.logger, notNullValue());
     }
   }
 
   @Test
-  public void defaultLoggerWithDefaultLoggerNamePlusCustomStreamName() {
-    try (EventSource es = builder.name("mystream").build()) {
-      assertEquals(SLF4JLogger.class, es.logger.getClass());
-      assertEquals("com.launchdarkly.eventsource.EventSource.mystream", ((SLF4JLogger)es.logger).name);
-    }
-  }
-
-  @Test
-  public void customStreamNameIsIgnoredInLoggerName() {
-    try (EventSource es = builder.name("").build()) {
-      assertEquals(SLF4JLogger.class, es.logger.getClass());
-      assertEquals("com.launchdarkly.eventsource.EventSource", ((SLF4JLogger)es.logger).name);
-    }
-  }
-
-  @Test
-  public void defaultLoggerWithCustomLoggerName() {
-    try (EventSource es = builder.loggerBaseName("mylog").build()) {
-      assertEquals(SLF4JLogger.class, es.logger.getClass());
-      assertEquals("mylog", ((SLF4JLogger)es.logger).name);
-    }
-  }
-
-  @Test
-  public void defaultLoggerWithCustomLoggerNamePlusCustomStreamName() {
-    try (EventSource es = builder.loggerBaseName("mylog").name("mystream").build()) {
-      assertEquals(SLF4JLogger.class, es.logger.getClass());
-      assertEquals("mylog.mystream", ((SLF4JLogger)es.logger).name);
-    }
-  }
-
-  @Test
-  public void customLogger() {
-    Logger myLogger = new SLF4JLogger("x");
+  public void logger() {
+    LogCapture logCapture = Logs.capture();
+    LDLogger myLogger = LDLogger.withAdapter(logCapture, "logname");
     try (EventSource es = builder.logger(myLogger).build()) {
-      assertSame(myLogger, es.logger);
+      es.logger.warn("hello");
+      assertThat(logCapture.getMessages(), iterableWithSize(1));
+      assertEquals("hello", logCapture.getMessages().get(0).getText());
+    }
+  }
+
+  @Test
+  @SuppressWarnings("deprecation")
+  public void customLogger() {
+    final AtomicReference<String> receivedMessage = new AtomicReference<String>();
+    Logger myLogger = new Logger() {
+      public void warn(String message) {
+        receivedMessage.set(message);
+      }
+      
+      public void info(String message) {}
+      
+      public void error(String message) {}
+      
+      public void debug(String format, Object param1, Object param2) {}
+      
+      public void debug(String format, Object param) {}
+    };
+    try (EventSource es = builder.logger(myLogger).build()) {
+      es.logger.warn("hello");
+      assertEquals("hello", receivedMessage.get());
     }
   }
 

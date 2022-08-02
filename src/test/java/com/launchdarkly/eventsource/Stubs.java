@@ -1,5 +1,7 @@
 package com.launchdarkly.eventsource;
 
+import com.launchdarkly.logging.LDLogger;
+
 import java.time.Duration;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -77,7 +79,7 @@ class Stubs {
   
   static class TestHandler implements EventHandler {
     private final BlockingQueue<LogItem> log = new ArrayBlockingQueue<>(100);
-    private final Logger logger;
+    private final LDLogger logger;
     volatile RuntimeException fakeError = null;
     volatile RuntimeException fakeErrorFromErrorHandler = null;
     
@@ -85,7 +87,7 @@ class Stubs {
       this(null);
     }
     
-    public TestHandler(Logger logger) {
+    public TestHandler(LDLogger logger) {
       this.logger = logger;
     }
     

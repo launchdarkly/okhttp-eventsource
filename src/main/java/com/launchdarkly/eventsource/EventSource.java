@@ -12,11 +12,11 @@ import java.net.Proxy.Type;
 import java.net.URI;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
+import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Locale;
-import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -120,7 +120,7 @@ public class EventSource implements Closeable {
   private final AtomicReference<ReadyState> readyState;
   private final OkHttpClient client;
   private volatile Call call;
-  private final Random jitter = new Random();
+  private final SecureRandom jitter = new SecureRandom();
 
   EventSource(Builder builder) {
     this.name = builder.name == null ? "" : builder.name;

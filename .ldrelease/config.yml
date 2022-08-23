@@ -10,6 +10,11 @@ jobs:
     template:
       name: gradle
 
+branches:
+  - name: main
+  - name: 2.x
+  - name: 1.x
+
 publications:
   - url: https://oss.sonatype.org/content/groups/public/com/launchdarkly/okhttp-eventsource/
     description: Sonatype

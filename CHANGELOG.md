@@ -2,6 +2,10 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [1.11.3] - 2022-08-22
+### Changed:
+- Changed jitter logic that used `java.util.Random` to use `java.security.SecureRandom`. Even though in this case it is not being used for any cryptographic purpose, but only to produce a pseudo-random delay, static analysis tools may still report every use of `java.util.Random` as a security risk by default. The purpose of this change is simply to avoid such warnings; it has no practical effect on the behavior of the library.
+
 ## [2.7.0] - 2022-08-02
 The main purpose of this release is to introduce a new logging facade, [`com.launchdarkly.logging`](https://github.com/launchdarkly/java-logging), to streamline how logging works in LaunchDarkly Java and Android code. Previously, `okhttp-eventsource` used SLF4J for logging by default, but could be made to send output to a `Logger` interface of its own; the LaunchDarkly Java SDK used only SLF4J, so developers needed to provide an SLF4J configuration externally; and the LaunchDarkly Android SDK used Timber, but still brought in SLF4J as a transitive dependency of `okhttp-eventsource`. In this release, the default behavior is still to use SLF4J, but the logging facade can also be configured programmatically to do simple console logging without SLF4J, or to forward output to another framework such as `java.util.logging`, or other destinations. In a future major version release, the default behavior will be changed so that `okhttp-eventsource` does not require SLF4J as a dependency.
 

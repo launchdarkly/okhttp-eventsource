@@ -1,8 +1,6 @@
 package com.launchdarkly.eventsource;
 
-import java.time.Duration;
-
 interface ConnectionHandler {
-  void setReconnectionTime(Duration reconnectionTime);
+  void setReconnectTimeMillis(long reconnecTimeMillis);
   void setLastEventId(String lastEventId);
 }

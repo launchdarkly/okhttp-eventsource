@@ -22,7 +22,7 @@ public abstract class TestHandlers {
       );
   }
   
-  public static Handler chunksFromString(String body, int chunkSize, Duration delay, boolean leaveOpen) {
+  public static Handler chunksFromString(String body, int chunkSize, long delayMillis, boolean leaveOpen) {
     List<Handler> handlers = new ArrayList<>();
     handlers.add(Handlers.SSE.start());
     
@@ -31,8 +31,8 @@ public abstract class TestHandlers {
       int p = i * chunkSize;
       String chunk = body.substring(p, Math.min(body.length(), p + chunkSize));
       handlers.add(Handlers.writeChunkString(chunk));
-      if (!delay.isZero() && !delay.isNegative()) {
-        handlers.add(Handlers.delay(delay));
+      if (delayMillis > 0) {
+        handlers.add(Handlers.delay(Duration.ofMillis(delayMillis)));
       }
     }
     

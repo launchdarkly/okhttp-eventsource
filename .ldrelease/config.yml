@@ -23,8 +23,3 @@ publications:
 
 documentation:
   gitHubPages: true
-
-branches:
-  - name: main
-  - name: 2.x
-  - name: 1.x

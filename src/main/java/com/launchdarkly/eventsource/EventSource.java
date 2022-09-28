@@ -794,6 +794,7 @@ public class EventSource implements Closeable {
      * @see EventSource#DEFAULT_RECONNECT_TIME
      * @deprecated use {@link #reconnectTime(long, TimeUnit)}
      */
+    @Deprecated
     public Builder reconnectTime(Duration reconnectTime) {
       this.reconnectTimeMillis = reconnectTime == null ? DEFAULT_RECONNECT_TIME_MILLIS : reconnectTime.toMillis();
       return this;
@@ -820,7 +821,9 @@ public class EventSource implements Closeable {
      * @param maxReconnectTime the maximum delay; null to use the default
      * @return the builder
      * @see EventSource#DEFAULT_MAX_RECONNECT_TIME
+     * @deprecated use {@link #maxReconnectTime(long, TimeUnit)}
      */
+    @Deprecated
     public Builder maxReconnectTime(Duration maxReconnectTime) {
       this.maxReconnectTimeMillis = maxReconnectTime == null ? DEFAULT_MAX_RECONNECT_TIME_MILLIS :
         maxReconnectTime.toMillis();
@@ -856,7 +859,9 @@ public class EventSource implements Closeable {
      *   the delay; null to use the default 
      * @return the builder
      * @see EventSource#DEFAULT_BACKOFF_RESET_THRESHOLD
+     * @deprecated use {@link #backoffResetThreshold(long, TimeUnit)}
      */
+    @Deprecated
     public Builder backoffResetThreshold(Duration backoffResetThreshold) {
       this.backoffResetThresholdMillis = backoffResetThreshold == null ? DEFAULT_BACKOFF_RESET_THRESHOLD_MILLIS :
         backoffResetThreshold.toMillis();

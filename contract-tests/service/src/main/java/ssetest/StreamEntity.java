@@ -3,7 +3,6 @@ package ssetest;
 import com.launchdarkly.eventsource.*;
 import com.launchdarkly.logging.*;
 import java.net.URI;
-import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import okhttp3.*;
@@ -36,10 +35,10 @@ public class StreamEntity implements EventHandler {
       eb.headers(hb.build());
     }
     if (options.initialDelayMs != null) {
-      eb.reconnectTime(Duration.ofMillis(options.initialDelayMs));
+      eb.reconnectTime(options.initialDelayMs, null);
     }
     if (options.readTimeoutMs != null) {
-      eb.readTimeout(Duration.ofMillis(options.readTimeoutMs));
+      eb.readTimeout(options.readTimeoutMs, null);
     }
     if (options.lastEventId != null) {
       eb.lastEventId(options.lastEventId);

@@ -11,8 +11,6 @@ import org.junit.Rule;
 import org.junit.Test;
 
 import java.io.IOException;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -133,7 +131,7 @@ public class EventSourceHttpTest {
 
     try (HttpServer server = HttpServer.start(streamHandler)) {
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
-          .reconnectTime(Duration.ofMillis(10))
+          .reconnectTime(10, null)
           .logger(testLogger.getLogger())
           .build()) {
         es.start();
@@ -165,7 +163,7 @@ public class EventSourceHttpTest {
 
     try (HttpServer server = HttpServer.start(streamHandler)) {
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
-          .reconnectTime(Duration.ofMillis(10))
+          .reconnectTime(10, null)
           .logger(testLogger.getLogger())
           .build()) {
         es.start();
@@ -173,7 +171,7 @@ public class EventSourceHttpTest {
         assertEquals(Stubs.LogItem.opened(), eventSink.awaitLogItem());
         assertEquals(Stubs.LogItem.event(eventType, eventData, null), eventSink.awaitLogItem());
         
-        assertEquals(Duration.ofMillis(300), es.reconnectTime);
+        assertEquals(300, es.reconnectTimeMillis);
       }
     }
   }
@@ -272,7 +270,7 @@ public class EventSourceHttpTest {
             "data: def\n\n";
     
     TestHandler eventSink = new TestHandler(testLogger.getLogger());
-    Handler streamHandler = chunksFromString(body, 5, Duration.ZERO, true);
+    Handler streamHandler = chunksFromString(body, 5, 0, true);
     
     try (HttpServer server = HttpServer.start(streamHandler)) {
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
@@ -313,7 +311,7 @@ public class EventSourceHttpTest {
             "data: def\n\n";
 
     TestHandler eventSink = new TestHandler(testLogger.getLogger());
-    Handler streamHandler = chunksFromString(body, 5, Duration.ZERO, true);
+    Handler streamHandler = chunksFromString(body, 5, 0, true);
 
     try (HttpServer server = HttpServer.start(streamHandler)) {
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
@@ -355,7 +353,7 @@ public class EventSourceHttpTest {
         super.onMessage(event, messageEvent);
       }
     };
-    Handler streamHandler = chunksFromString(body, 5, Duration.ZERO, true);
+    Handler streamHandler = chunksFromString(body, 5, 0, true);
 
     try (HttpServer server = HttpServer.start(streamHandler)) {
       EventSource es = new EventSource.Builder(eventSink, server.getUri())
@@ -370,7 +368,7 @@ public class EventSourceHttpTest {
                 eventSink.awaitLogItem());
       } finally {
         es.close();
-        assertTrue("Expected close to complete", es.awaitClosed(Duration.ofSeconds(10)));
+        assertTrue("Expected close to complete", es.awaitClosed(10, TimeUnit.SECONDS));
         assertTrue(received.get());
       }
     }
@@ -392,7 +390,7 @@ public class EventSourceHttpTest {
         super.onMessage(event, messageEvent);
       }
     };
-    Handler streamHandler = chunksFromString(body, 5, Duration.ZERO, true);
+    Handler streamHandler = chunksFromString(body, 5, 0, true);
 
     try (HttpServer server = HttpServer.start(streamHandler)) {
       EventSource es = new EventSource.Builder(eventSink, server.getUri())
@@ -408,7 +406,7 @@ public class EventSourceHttpTest {
         es.close();
        
         try {
-          assertFalse("Expected awaitClosed to time out", es.awaitClosed(Duration.ofSeconds(2)));
+          assertFalse("Expected awaitClosed to time out", es.awaitClosed(2, TimeUnit.SECONDS));
         } finally {
           handlerCanProceed.countDown();
         }
@@ -463,11 +461,11 @@ public class EventSourceHttpTest {
           .build()) {
         es.start();
         
-        assertNumberOfThreadsWithSubstring(name, 2, Duration.ofSeconds(2));
+        assertNumberOfThreadsWithSubstring(name, 2, 2000);
 
         es.close();
         
-        assertNumberOfThreadsWithSubstring(name, 0, Duration.ofSeconds(2));
+        assertNumberOfThreadsWithSubstring(name, 0, 2000);
       }
     }
   }
@@ -494,20 +492,20 @@ public class EventSourceHttpTest {
         
         assertEquals(LogItem.opened(), eventSink.awaitLogItem());
         
-        assertNumberOfThreadsWithSubstring(name, 2, Duration.ofSeconds(2));
+        assertNumberOfThreadsWithSubstring(name, 2, 2000);
 
         closeStreamSemaphore.release();
         assertEquals("closed", eventSink.awaitLogItem().action);
         
-        assertNumberOfThreadsWithSubstring(name, 0, Duration.ofSeconds(2));
+        assertNumberOfThreadsWithSubstring(name, 0, 2000);
       }
     }
   }
   
-  private void assertNumberOfThreadsWithSubstring(String s, int expectedCount, Duration timeout) throws Exception {
-    Instant limit = Instant.now().plus(timeout);
+  private void assertNumberOfThreadsWithSubstring(String s, int expectedCount, long timeoutMillis) throws Exception {
+    long deadline = System.currentTimeMillis() + timeoutMillis;
     int count = 0;
-    while (Instant.now().isBefore(limit)) {
+    while (System.currentTimeMillis() < deadline) {
       int n = Thread.currentThread().getThreadGroup().activeCount();
       Thread[] ts = new Thread[n];
       Thread.currentThread().getThreadGroup().enumerate(ts, true);
@@ -523,7 +521,7 @@ public class EventSourceHttpTest {
       Thread.sleep(50);
     }
     fail("wanted " + expectedCount + " threads with substring '" + s
-        + "' but found " + count + " after " + timeout);
+        + "' but found " + count + " after " + timeoutMillis + "ms");
   }
   
   private static class ThreadCapturingHandler implements EventHandler {

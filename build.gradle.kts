@@ -124,7 +124,8 @@ tasks.jacocoTestCoverageVerification.configure {
             // The key for each of these items is the complete method signature minus the "com.launchdarkly.eventsource." prefix.
             "AsyncEventHandler.acquire()" to 2,
             "AsyncEventHandler.execute(java.lang.Runnable)" to 3,
-            "EventSource.awaitClosed(java.time.Duration)" to 3,
+            "EventSource.awaitClosed(long, java.util.concurrent.TimeUnit)" to 2,
+            "EventSource.awaitClosed(java.time.Duration)" to 1,
             "EventSource.handleSuccessfulResponse(okhttp3.Response)" to 2,
             "EventSource.maybeReconnectDelay(int, long)" to 2,
             "EventSource.run()" to 3,

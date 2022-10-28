@@ -12,7 +12,6 @@ import java.net.URI;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 import java.security.SecureRandom;
-import java.time.Duration;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Locale;
@@ -68,29 +67,29 @@ public class EventSource implements Closeable {
   final LDLogger logger; // visible for tests
 
   /**
-   * The default value for {@link Builder#reconnectTime(Duration)}: 1 second.
+   * The default value for {@link Builder#reconnectTime(long, TimeUnit)}: 1 second.
    */
-  public static final Duration DEFAULT_RECONNECT_TIME = Duration.ofSeconds(1);
+  public static final long DEFAULT_RECONNECT_TIME_MILLIS = 1000;
   /**
-   * The default value for {@link Builder#maxReconnectTime(Duration)}: 30 seconds.
+   * The default value for {@link Builder#maxReconnectTime(long, TimeUnit)}: 30 seconds.
    */
-  public static final Duration DEFAULT_MAX_RECONNECT_TIME = Duration.ofSeconds(30);
+  public static final long DEFAULT_MAX_RECONNECT_TIME_MILLIS = 30000;
   /**
-   * The default value for {@link Builder#connectTimeout(Duration)}: 10 seconds.
+   * The default value for {@link Builder#connectTimeout(long, TimeUnit)}: 10 seconds.
    */
-  public static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(10);
+  public static final long DEFAULT_CONNECT_TIMEOUT_MILLIS = 10000;
   /**
-   * The default value for {@link Builder#writeTimeout(Duration)}: 5 seconds.
+   * The default value for {@link Builder#writeTimeout(long, TimeUnit)}: 5 seconds.
    */
-  public static final Duration DEFAULT_WRITE_TIMEOUT = Duration.ofSeconds(5);
+  public static final long DEFAULT_WRITE_TIMEOUT_MILLIS = 5000;
   /**
-   * The default value for {@link Builder#readTimeout(Duration)}: 5 minutes.
+   * The default value for {@link Builder#readTimeout(long, TimeUnit)}: 5 minutes.
    */
-  public static final Duration DEFAULT_READ_TIMEOUT = Duration.ofMinutes(5);
+  public static final long DEFAULT_READ_TIMEOUT_MILLIS = 5000;
   /**
-   * The default value for {@link Builder#backoffResetThreshold(Duration)}: 60 seconds.
+   * The default value for {@link Builder#backoffResetThreshold(long, TimeUnit)}: 60 seconds.
    */
-  public static final Duration DEFAULT_BACKOFF_RESET_THRESHOLD = Duration.ofSeconds(60);
+  public static final long DEFAULT_BACKOFF_RESET_THRESHOLD_MILLIS = 60000;
   /**
    * The default value for {@link Builder#readBufferSize(int)}.
    */
@@ -108,9 +107,9 @@ public class EventSource implements Closeable {
   private final ExecutorService eventExecutor;
   private final ExecutorService streamExecutor;
   final int readBufferSize; // visible for tests
-  volatile Duration reconnectTime; // visible for tests
-  final Duration maxReconnectTime; // visible for tests
-  final Duration backoffResetThreshold; // visible for tests
+  volatile long reconnectTimeMillis; // visible for tests
+  final long maxReconnectTimeMillis; // visible for tests
+  final long backoffResetThresholdMillis; // visible for tests
   private volatile String lastEventId;
   final AsyncEventHandler handler; // visible for tests
   private final ConnectionErrorHandler connectionErrorHandler;
@@ -130,9 +129,9 @@ public class EventSource implements Closeable {
     this.body = builder.body;
     this.requestTransformer = builder.requestTransformer;
     this.lastEventId = builder.lastEventId;
-    this.reconnectTime = builder.reconnectTime;
-    this.maxReconnectTime = builder.maxReconnectTime;
-    this.backoffResetThreshold = builder.backoffResetThreshold;
+    this.reconnectTimeMillis = builder.reconnectTimeMillis;
+    this.maxReconnectTimeMillis = builder.maxReconnectTimeMillis;
+    this.backoffResetThresholdMillis = builder.backoffResetThresholdMillis;
     this.streamEventData = builder.streamEventData;
     this.expectFields = builder.expectFields;
     
@@ -242,14 +241,17 @@ public class EventSource implements Closeable {
   /**
    * Block until all underlying threads have terminated and resources have been released.
    *
-   * @param timeout maximum time to wait for everything to shut down
+   * @param timeout maximum time to wait for everything to shut down, in whatever time unit is specified
+   *   by {@code timeUnit}
+   * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
    * @return {@code true} if all thread pools terminated within the specified timeout, {@code false} otherwise.
    * @throws InterruptedException if this thread is interrupted while blocking
    */
-  public boolean awaitClosed(final Duration timeout) throws InterruptedException {
-    final long deadline = System.currentTimeMillis() + timeout.toMillis();
+  public boolean awaitClosed(long timeout, TimeUnit timeUnit) throws InterruptedException {
+    long timeoutMillis = millisFromTimeUnit(timeout, timeUnit);
+    final long deadline = System.currentTimeMillis() + timeoutMillis;
 
-    if (!eventExecutor.awaitTermination(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+    if (!eventExecutor.awaitTermination(timeoutMillis, TimeUnit.MILLISECONDS)) {
       return false;
     }
 
@@ -267,7 +269,7 @@ public class EventSource implements Closeable {
 
     return true;
   }
-  
+
   private void closeCurrentStream(ReadyState previousState) {
     if (previousState == ReadyState.OPEN) {
       handler.onClosed();
@@ -319,7 +321,7 @@ public class EventSource implements Closeable {
   }
 
   private int maybeReconnectDelay(int reconnectAttempts, long connectedTime) {
-    if (reconnectTime.isZero() || reconnectTime.isNegative()) {
+    if (reconnectTimeMillis <= 0) {
       return reconnectAttempts;
     }
     
@@ -327,14 +329,14 @@ public class EventSource implements Closeable {
     
     // Reset the backoff if we had a successful connection that stayed good for at least
     // backoffResetThresholdMs milliseconds.
-    if (connectedTime > 0 && (System.currentTimeMillis() - connectedTime) >= backoffResetThreshold.toMillis()) {
+    if (connectedTime > 0 && (System.currentTimeMillis() - connectedTime) >= backoffResetThresholdMillis) {
       counter = 1;
     }
     
     try {
-      Duration sleepTime = backoffWithJitter(counter);
-      logger.info("Waiting {} milliseconds before reconnecting...", sleepTime.toMillis());
-      Thread.sleep(sleepTime.toMillis());
+      long sleepTimeMillis = backoffWithJitterMillis(counter);
+      logger.info("Waiting {} milliseconds before reconnecting...", sleepTimeMillis);
+      Thread.sleep(sleepTimeMillis);
     } catch (InterruptedException ignored) { // COVERAGE: no way to cause this in unit tests
     }
     
@@ -401,8 +403,8 @@ public class EventSource implements Closeable {
   private void handleSuccessfulResponse(Response response) throws IOException {
     ConnectionHandler connectionHandler = new ConnectionHandler() {
       @Override
-      public void setReconnectionTime(Duration reconnectionTime) {
-        EventSource.this.setReconnectionTime(reconnectionTime);
+      public void setReconnectTimeMillis(long reconnectTimeMillis) {
+        EventSource.this.setReconnectTimeMillis(reconnectTimeMillis);
       }
       
       @Override
@@ -446,11 +448,11 @@ public class EventSource implements Closeable {
     return action;
   }
 
-  Duration backoffWithJitter(int reconnectAttempts) {
-    long maxTimeLong = Math.min(maxReconnectTime.toMillis(), reconnectTime.toMillis() * pow2(reconnectAttempts));
+  long backoffWithJitterMillis(int reconnectAttempts) {
+    long maxTimeLong = Math.min(maxReconnectTimeMillis, reconnectTimeMillis * pow2(reconnectAttempts));
     // 2^31 milliseconds is much longer than any reconnect time we would reasonably want to use, so we can pin this to int
     int maxTimeInt = maxTimeLong > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int)maxTimeLong;
-    return Duration.ofMillis(maxTimeInt / 2 + jitter.nextInt(maxTimeInt) / 2);
+    return maxTimeInt / 2 + jitter.nextInt(maxTimeInt) / 2;
   }
 
   private static Headers addDefaultHeaders(Headers custom) {
@@ -473,11 +475,11 @@ public class EventSource implements Closeable {
     return builder.build();
   }
 
-  // setReconnectionTime and setLastEventId are used only by our internal ConnectionHandler, in response
+  // setReconnectTimeMillis and setLastEventId are used only by our internal ConnectionHandler, in response
   // to stream events. From an application's point of view, these properties can only be set at
   // configuration time via the builder.
-  private void setReconnectionTime(Duration reconnectionTime) {
-    this.reconnectTime = reconnectionTime;
+  private void setReconnectTimeMillis(long reconnectTimeMillis) {
+    this.reconnectTimeMillis = reconnectTimeMillis;
   }
 
   private void setLastEventId(String lastEventId) {
@@ -520,6 +522,14 @@ public class EventSource implements Closeable {
     return this.url.uri();
   }
 
+  private static long millisFromTimeUnit(long duration, TimeUnit timeUnit) {
+    return timeUnitOrDefault(timeUnit).toMillis(duration);
+  }
+
+  private static TimeUnit timeUnitOrDefault(TimeUnit timeUnit) {
+    return timeUnit == null ? TimeUnit.MILLISECONDS : timeUnit;
+  }
+  
   /**
    * Interface for an object that can modify the network request that the EventSource will make.
    * Use this in conjunction with {@link EventSource.Builder#requestTransformer(EventSource.RequestTransformer)}
@@ -555,9 +565,9 @@ public class EventSource implements Closeable {
    */
   public static final class Builder {
     private String name;
-    private Duration reconnectTime = DEFAULT_RECONNECT_TIME;
-    private Duration maxReconnectTime = DEFAULT_MAX_RECONNECT_TIME;
-    private Duration backoffResetThreshold = DEFAULT_BACKOFF_RESET_THRESHOLD;
+    private long reconnectTimeMillis = DEFAULT_RECONNECT_TIME_MILLIS;
+    private long maxReconnectTimeMillis = DEFAULT_MAX_RECONNECT_TIME_MILLIS;
+    private long backoffResetThresholdMillis = DEFAULT_BACKOFF_RESET_THRESHOLD_MILLIS;
     private String lastEventId;
     private final HttpUrl url;
     private final EventHandler handler;
@@ -611,9 +621,9 @@ public class EventSource implements Closeable {
     private static OkHttpClient.Builder createInitialClientBuilder() {
       OkHttpClient.Builder b = new OkHttpClient.Builder()
           .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
-          .connectTimeout(DEFAULT_CONNECT_TIMEOUT)
-          .readTimeout(DEFAULT_READ_TIMEOUT)
-          .writeTimeout(DEFAULT_WRITE_TIMEOUT)
+          .connectTimeout(DEFAULT_CONNECT_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+          .readTimeout(DEFAULT_READ_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+          .writeTimeout(DEFAULT_WRITE_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
           .retryOnConnectionFailure(true);
       try {
         b.sslSocketFactory(new ModernTLSSocketFactory(), defaultTrustManager());
@@ -689,33 +699,35 @@ public class EventSource implements Closeable {
       this.lastEventId = lastEventId;
       return this;
     }
-    
+
     /**
      * Sets the minimum delay between connection attempts. The actual delay may be slightly less or
      * greater, since there is a random jitter. When there is a connection failure, the delay will
-     * start at this value and will increase exponentially up to the {@link #maxReconnectTime(Duration)}
+     * start at this value and will increase exponentially up to the {@link #maxReconnectTime(long, TimeUnit)}
      * value with each subsequent failure, unless it is reset as described in
-     * {@link Builder#backoffResetThreshold(Duration)}.
+     * {@link Builder#backoffResetThreshold(long, TimeUnit)}.
      * 
-     * @param reconnectTime the minimum delay; null to use the default
+     * @param reconnectTime the minimum delay, in whatever time unit is specified by {@code timeUnit}
+     * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
      * @return the builder
-     * @see EventSource#DEFAULT_RECONNECT_TIME
+     * @see EventSource#DEFAULT_RECONNECT_TIME_MILLIS
      */
-    public Builder reconnectTime(Duration reconnectTime) {
-      this.reconnectTime = reconnectTime == null ? DEFAULT_RECONNECT_TIME : reconnectTime;
+    public Builder reconnectTime(long reconnectTime, TimeUnit timeUnit) {
+      reconnectTimeMillis = millisFromTimeUnit(reconnectTime, timeUnit);
       return this;
     }
 
     /**
-     * Sets the maximum delay between connection attempts. See {@link #reconnectTime(Duration)}.
+     * Sets the maximum delay between connection attempts. See {@link #reconnectTime(long, TimeUnit)}.
      * The default value is 30 seconds.
      * 
-     * @param maxReconnectTime the maximum delay; null to use the default
+     * @param maxReconnectTime the maximum delay, in whatever time unit is specified by {@code timeUnit}
+     * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
      * @return the builder
-     * @see EventSource#DEFAULT_MAX_RECONNECT_TIME
+     * @see EventSource#DEFAULT_MAX_RECONNECT_TIME_MILLIS
      */
-    public Builder maxReconnectTime(Duration maxReconnectTime) {
-      this.maxReconnectTime = maxReconnectTime == null ? DEFAULT_MAX_RECONNECT_TIME : maxReconnectTime;
+    public Builder maxReconnectTime(long maxReconnectTime, TimeUnit timeUnit) {
+      this.maxReconnectTimeMillis = millisFromTimeUnit(maxReconnectTime, timeUnit);
       return this;
     }
 
@@ -727,12 +739,13 @@ public class EventSource implements Closeable {
      * rarely restarted.
      *   
      * @param backoffResetThreshold the minimum time that a connection must stay open to avoid resetting
-     *   the delay; null to use the default 
+     *   the delay, in whatever time unit is specified by {@code timeUnit}
+     * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
      * @return the builder
-     * @see EventSource#DEFAULT_BACKOFF_RESET_THRESHOLD
+     * @see EventSource#DEFAULT_BACKOFF_RESET_THRESHOLD_MILLIS
      */
-    public Builder backoffResetThreshold(Duration backoffResetThreshold) {
-      this.backoffResetThreshold = backoffResetThreshold == null ? DEFAULT_BACKOFF_RESET_THRESHOLD : backoffResetThreshold;
+    public Builder backoffResetThreshold(long backoffResetThreshold, TimeUnit timeUnit) {
+      this.backoffResetThresholdMillis = millisFromTimeUnit(backoffResetThreshold, timeUnit);
       return this;
     }
 
@@ -797,24 +810,26 @@ public class EventSource implements Closeable {
     /**
      * Sets the connection timeout.
      *
-     * @param connectTimeout the connection timeout; null to use the default
+     * @param connectTimeout the connection timeout, in whatever time unit is specified by {@code timeUnit}
+     * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
      * @return the builder
-     * @see EventSource#DEFAULT_CONNECT_TIMEOUT
+     * @see EventSource#DEFAULT_CONNECT_TIMEOUT_MILLIS
      */
-    public Builder connectTimeout(Duration connectTimeout) {
-      this.clientBuilder.connectTimeout(connectTimeout == null ? DEFAULT_CONNECT_TIMEOUT : connectTimeout);
+    public Builder connectTimeout(long connectTimeout, TimeUnit timeUnit) {
+      this.clientBuilder.connectTimeout(connectTimeout, timeUnitOrDefault(timeUnit));
       return this;
     }
 
     /**
      * Sets the write timeout.
      *
-     * @param writeTimeout the write timeout; null to use the default
+     * @param writeTimeout the write timeout, in whatever time unit is specified by {@code timeUnit}
+     * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
      * @return the builder
-     * @see EventSource#DEFAULT_WRITE_TIMEOUT
+     * @see EventSource#DEFAULT_WRITE_TIMEOUT_MILLIS
      */
-    public Builder writeTimeout(Duration writeTimeout) {
-      this.clientBuilder.writeTimeout(writeTimeout == null ? DEFAULT_WRITE_TIMEOUT : writeTimeout);
+    public Builder writeTimeout(long writeTimeout, TimeUnit timeUnit) {
+      this.clientBuilder.writeTimeout(writeTimeout, timeUnitOrDefault(timeUnit));
       return this;
     }
 
@@ -822,12 +837,13 @@ public class EventSource implements Closeable {
      * Sets the read timeout. If a read timeout happens, the {@code EventSource}
      * will restart the connection.
      *
-     * @param readTimeout the read timeout; null to use the default
+     * @param readTimeout the read timeout, in whatever time unit is specified by {@code timeUnit}
+     * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
      * @return the builder
-     * @see EventSource#DEFAULT_READ_TIMEOUT
+     * @see EventSource#DEFAULT_READ_TIMEOUT_MILLIS
      */
-    public Builder readTimeout(Duration readTimeout) {
-      this.clientBuilder.readTimeout(readTimeout == null ? DEFAULT_READ_TIMEOUT : readTimeout); 
+    public Builder readTimeout(long readTimeout, TimeUnit timeUnit) {
+      this.clientBuilder.readTimeout(readTimeout, timeUnitOrDefault(timeUnit)); 
       return this;
     }
 

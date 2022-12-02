@@ -10,7 +10,6 @@ import org.junit.Rule;
 import org.junit.Test;
 
 import java.net.ProtocolException;
-import java.time.Duration;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Semaphore;
@@ -32,7 +31,7 @@ public class EventSourceHttpReconnectTest {
   public void eventSourceReconnectsAfterSocketClosed() throws Exception {
     verifyReconnectAfterStreamInterrupted(
         null,
-        Duration.ofMillis(10),
+        10,
         eventSink -> {
           assertEquals(LogItem.closed(), eventSink.awaitLogItem());
         });
@@ -40,7 +39,7 @@ public class EventSourceHttpReconnectTest {
   
   private void verifyReconnectAfterStreamInterrupted(
       Handler extraErrorAfterReconnectHandler,
-      Duration reconnectTime,
+      long reconnectTimeMillis,
       Consumer<TestHandler> checkExpectedEvents
       ) throws Exception {
     String body1 = "data: first";
@@ -64,7 +63,7 @@ public class EventSourceHttpReconnectTest {
         
     try (HttpServer server = HttpServer.start(allRequests)) {      
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
-          .reconnectTime(reconnectTime)
+          .reconnectTime(reconnectTimeMillis, null)
           .logger(testLogger.getLogger())
           .build()) {
         es.start();
@@ -95,7 +94,7 @@ public class EventSourceHttpReconnectTest {
   public void eventSourceReconnectsAfterHttpErrorOnFirstRequest() throws Exception {
     verifyReconnectAfterErrorOnFirstRequest(
         Handlers.status(500),
-        Duration.ofMillis(10),
+        10,
         eventSink -> {
           LogItem errorItem = eventSink.awaitLogItem();
           assertEquals(LogItem.error(new UnsuccessfulResponseException(500)), errorItem);
@@ -107,7 +106,7 @@ public class EventSourceHttpReconnectTest {
   public void eventSourceReconnectsAfterNetworkErrorOnFirstRequest() throws Exception {
     verifyReconnectAfterErrorOnFirstRequest(
         Handlers.malformedResponse(),
-        Duration.ofMillis(10),
+        10,
         eventSink -> {
           LogItem errorItem = eventSink.awaitLogItem();
           assertEquals(ProtocolException.class, errorItem.error.getClass());
@@ -116,7 +115,7 @@ public class EventSourceHttpReconnectTest {
 
   private void verifyReconnectAfterErrorOnFirstRequest(
       Handler errorProducer,
-      Duration reconnectTime,
+      long reconnectTimeMillis,
       Consumer<TestHandler> checkExpectedEvents
       ) throws Exception {
     String body = "data: good";
@@ -128,7 +127,7 @@ public class EventSourceHttpReconnectTest {
  
     try (HttpServer server = HttpServer.start(allRequests)) { 
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
-          .reconnectTime(reconnectTime)
+          .reconnectTime(reconnectTimeMillis, null)
           .logger(testLogger.getLogger())
           .build()) {
         es.start();
@@ -152,7 +151,7 @@ public class EventSourceHttpReconnectTest {
   public void eventSourceReconnectsAgainAfterErrorOnFirstReconnect() throws Exception {
     verifyReconnectAfterStreamInterrupted(
         Handlers.status(500),
-        Duration.ofMillis(10),
+        10,
         eventSink -> {
           assertEquals(LogItem.closed(), eventSink.awaitLogItem());
           assertEquals(LogItem.error(new UnsuccessfulResponseException(500)),
@@ -164,7 +163,7 @@ public class EventSourceHttpReconnectTest {
   public void eventSourceReconnectsEvenIfDelayIsZero() throws Exception {
     verifyReconnectAfterStreamInterrupted(
         null,
-        Duration.ZERO,
+        0,
         eventSink -> {
           assertEquals(LogItem.closed(), eventSink.awaitLogItem());
         });
@@ -174,7 +173,7 @@ public class EventSourceHttpReconnectTest {
   public void eventSourceReconnectsEvenIfDelayIsNegative() throws Exception {
     verifyReconnectAfterStreamInterrupted(
         null,
-        Duration.ofMillis(-1),
+        -1,
         eventSink -> {
           assertEquals(LogItem.closed(), eventSink.awaitLogItem());
         });
@@ -196,7 +195,7 @@ public class EventSourceHttpReconnectTest {
     try (HttpServer server = HttpServer.start(Handlers.status(500))) {            
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
           .connectionErrorHandler(connectionErrorHandler)
-          .reconnectTime(Duration.ofMillis(10))
+          .reconnectTime(10, null)
           .logger(testLogger.getLogger())
           .build()) {
         es.start();
@@ -235,7 +234,7 @@ public class EventSourceHttpReconnectTest {
     
     try (HttpServer server = HttpServer.start(allRequests)) {            
       try (EventSource es = new EventSource.Builder(eventSink, server.getUri())
-          .reconnectTime(Duration.ofMillis(10))
+          .reconnectTime(10, null)
           .logger(testLogger.getLogger())
           .build()) {
         es.start();

@@ -2,6 +2,27 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [3.0.0] - 2022-12-02
+This release expands compatibility of the library with Android by removing Java 8 API usages that are not always available in Android. In effect, it restores the broader compatibility of the 1.x version while preserving the other API/functionality improvements that were added in 2.x. It also removes the previous dependency on SLF4J.
+
+### Changed:
+- Every `EventSource` and `EventSource` method that previously took a `java.time.Duration` parameter now takes `(long, TimeUnit)` parameters instead. This is to allow the library to be used from Android code on older platform versions that do not support the `java.time` types. It undoes an API change that was made in the 2.0.0 release.
+- SLF4J is no longer a dependency. Logging is done entirely through the [com.launchdarkly.logging](https://javadoc.io/doc/com.launchdarkly/launchdarkly-logging/latest/index.html) facade; see `EventSource.Builder.logger`.
+- Previously, if no logging destination was specified, the default behavior was to send log output to SLF4J. Now, the default behavior is to do no logging. If you still want to use SLF4J, do this (for "log.name", substitute whatever you want the logger name to be in SLF4J):
+
+```java
+// import com.launchdarkly.logging.*;
+// EventSource.Builder builder =
+//   new EventSource.Builder(myHandler, streamUri);
+
+builder.logger(
+  LDLogger.withAdapter(LDSLF4J.adapter(), "log.name") 
+);
+```
+
+### Removed:
+- `Logger` interface, `EventSource.Builder.logger(Logger)`, and `EventSource.Builder.loggerBaseName`. See note above on logging.
+
 ## [2.7.1] - 2022-08-23
 ### Changed:
 - Changed jitter logic that used `java.util.Random` to use `java.security.SecureRandom`. Even though in this case it is not being used for any cryptographic purpose, but only to produce a pseudo-random delay, static analysis tools may still report every use of `java.util.Random` as a security risk by default. The purpose of this change is simply to avoid such warnings; it has no practical effect on the behavior of the library.

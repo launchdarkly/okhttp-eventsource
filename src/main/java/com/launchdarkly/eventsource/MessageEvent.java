@@ -7,9 +7,15 @@ import java.net.URI;
 import java.util.Objects;
 
 /**
- * Event information that is passed to {@link EventHandler#onMessage(String, MessageEvent)}.
+ * Information about a message received from the stream.
+ * <p>
+ * The properties of a message are defined by the SSE specification. Every message
+ * has an event name set by the "event:" field ({@link #DEFAULT_EVENT_NAME} if not
+ * specified), a data string set by "date:" fields, an optional last event ID string
+ * (set by the "id:" field and defaulting to the same value until it is set again),
+ * and an origin URI (always the same stream URI).
  */
-public class MessageEvent {
+public class MessageEvent implements StreamEvent {
   /**
    * The default value of {@link #getEventName()} for all SSE messages that did not have an {@code event}
    * field. This constant is defined in the SSE specification.
@@ -175,9 +181,8 @@ public class MessageEvent {
    * returns a {@link Reader} that consumes the event data while it is being received. The
    * format is the same as described in {@link #getData()} (for instance, if the data was
    * sent in multiple lines, the lines are separated by {@code '\n'}). Because this {@link Reader}
-   * is connected directly to the HTTP response stream, it is only valid within the scope of
-   * your handler's {@link EventHandler#onMessage(String, MessageEvent)} method and will be
-   * closed as soon as your handler returns.
+   * is connected directly to the HTTP response stream, it is only valid until you read the next
+   * message.
    * <p>
    * See {@link EventSource.Builder#streamEventData(boolean)} for more details and important
    * limitations of the streaming mode.
@@ -232,7 +237,14 @@ public class MessageEvent {
     return data == null;
   }
   
-  void close() {
+  /**
+   * Indicates that you are finished with this message.
+   * <p>
+   * This method is only relevant if you are using streaming data mode. It tells
+   * EventSource that you will not be using the {@link #getDataReader()} stream any
+   * more and that any remaining data for this event should be skipped.
+   */
+  public void close() {
     synchronized (dataReaderLock) {
       if (dataReader != null) {
         try {

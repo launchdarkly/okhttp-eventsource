@@ -1,489 +1,159 @@
 package com.launchdarkly.eventsource;
 
 import com.launchdarkly.logging.LDLogger;
+import com.launchdarkly.logging.LogValues;
 
 import java.io.Closeable;
-import java.io.EOFException;
 import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.net.Proxy;
-import java.net.Proxy.Type;
 import java.net.URI;
-import java.security.GeneralSecurityException;
-import java.security.KeyStore;
-import java.security.SecureRandom;
-import java.util.Arrays;
+import java.net.URL;
 import java.util.HashSet;
-import java.util.Locale;
+import java.util.Iterator;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.TrustManagerFactory;
-import javax.net.ssl.X509TrustManager;
-
-import static com.launchdarkly.eventsource.Helpers.pow2;
-import static com.launchdarkly.eventsource.ReadyState.CLOSED;
-import static com.launchdarkly.eventsource.ReadyState.CONNECTING;
-import static com.launchdarkly.eventsource.ReadyState.OPEN;
+import static com.launchdarkly.eventsource.Helpers.millisFromTimeUnit;
 import static com.launchdarkly.eventsource.ReadyState.RAW;
 import static com.launchdarkly.eventsource.ReadyState.SHUTDOWN;
-import static java.lang.String.format;
 
-import okhttp3.Authenticator;
-import okhttp3.Call;
-import okhttp3.ConnectionPool;
-import okhttp3.Headers;
 import okhttp3.HttpUrl;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
 
 /**
- * A client for the <a href="https://html.spec.whatwg.org/multipage/server-sent-events.html#server-sent-events">Server-Sent
- * Events</a> (SSE) protocol.
+ * The SSE client.
  * <p>
- * Instances are always configured and constructed with {@link Builder}. The client is created in
- * an inactive state and will not connect until you call {@link #start()}.
+ * By default, EventSource makes HTTP requests using OkHttp, but it can be configured
+ * to read from any input stream. See {@link ConnectStrategy} and {@link HttpConnectStrategy}.
  * <p>
- * Note that although {@code EventSource} is named after the JavaScript API that is described in
- * the SSE specification, its behavior is not identical to standard web browser implementations of
- * EventSource, specifically in terms of failure/reconnection behavior: it will automatically
- * retry (with a backoff delay) for some error conditions where a browser will not retry. It also
- * supports request configuration options (such as request headers and method) that the browser
- * EventSource does not support. However, its interpretation of the stream data is fully conformant
- * with the SSE specification, unless you use the opt-in mode {@link Builder#streamEventData(boolean)}
- * which allows for greater efficiency in some use cases but has some behavioral constraints.
+ * Instances are always configured and constructed with {@link Builder}. The client is
+ * created in an inactive state.
+ * <p>
+ * The client uses a pull model where the caller starts the EventSource and then requests
+ * data from it synchronously on a single thread. The initial connection attempt is made
+ * when you call {@link #start()}, or when you first attempt to read an event.
+ * 
+ * To read events from the stream, you can either request them one at a time by calling
+ * {@link #readMessage()} or {@link #readAnyEvent()}, or consume them in a loop by calling
+ * {@link #messages()} or {@link #anyEvents()}. The "message" methods assume you are only
+ * interested in {@link MessageEvent} data, whereas the "anyEvent" methods also provide
+ * other kinds of stream information. These are blocking methods with no timeout; if you
+ * need a timeout mechanism, consider reading from the stream on a worker thread and
+ * using a queue such as {@link BlockingQueue} to consume the messages elsewhere. 
+ * <p>
+ * Note that although {@code EventSource} is named after the JavaScript API that is described
+ * in the SSE specification, its behavior is not necessarily identical to standard web browser
+ * implementations of EventSource: by default, it will automatically retry (with a backoff
+ * delay) for some error conditions where a browser will not retry, and it also supports
+ * request configuration options (such as request headers and method) that the browser
+ * EventSource does not support. However, its interpretation of the stream data is fully
+ * conformant with the SSE specification, unless you use the opt-in mode
+ * {@link Builder#streamEventData(boolean)} which allows for greater efficiency in some use
+ * cases but has some behavioral constraints.
  */
 public class EventSource implements Closeable {
-  final LDLogger logger; // visible for tests
+  private final LDLogger logger;
 
   /**
-   * The default value for {@link Builder#reconnectTime(long, TimeUnit)}: 1 second.
+   * The default value for {@link Builder#retryDelay(long, TimeUnit)}: 1 second.
    */
-  public static final long DEFAULT_RECONNECT_TIME_MILLIS = 1000;
+  public static final long DEFAULT_RETRY_DELAY_MILLIS = 1000;
   /**
-   * The default value for {@link Builder#maxReconnectTime(long, TimeUnit)}: 30 seconds.
+   * The default value for {@link Builder#retryDelayResetThreshold(long, TimeUnit)}: 60 seconds.
    */
-  public static final long DEFAULT_MAX_RECONNECT_TIME_MILLIS = 30000;
-  /**
-   * The default value for {@link Builder#connectTimeout(long, TimeUnit)}: 10 seconds.
-   */
-  public static final long DEFAULT_CONNECT_TIMEOUT_MILLIS = 10000;
-  /**
-   * The default value for {@link Builder#writeTimeout(long, TimeUnit)}: 5 seconds.
-   */
-  public static final long DEFAULT_WRITE_TIMEOUT_MILLIS = 5000;
-  /**
-   * The default value for {@link Builder#readTimeout(long, TimeUnit)}: 5 minutes.
-   */
-  public static final long DEFAULT_READ_TIMEOUT_MILLIS = 5000;
-  /**
-   * The default value for {@link Builder#backoffResetThreshold(long, TimeUnit)}: 60 seconds.
-   */
-  public static final long DEFAULT_BACKOFF_RESET_THRESHOLD_MILLIS = 60000;
+  public static final long DEFAULT_RETRY_DELAY_RESET_THRESHOLD_MILLIS = 60000;
   /**
    * The default value for {@link Builder#readBufferSize(int)}.
    */
   public static final int DEFAULT_READ_BUFFER_SIZE = 1000;
   
-  private static final Headers defaultHeaders =
-      new Headers.Builder().add("Accept", "text/event-stream").add("Cache-Control", "no-cache").build();
+  // Note that some fields have package-private visibility for tests.
   
-  private final String name;
-  private volatile HttpUrl url;
-  private final Headers headers;
-  private final String method;
-  private final RequestBody body;
-  private final RequestTransformer requestTransformer;
-  private final ExecutorService eventExecutor;
-  private final ExecutorService streamExecutor;
-  final int readBufferSize; // visible for tests
-  volatile long reconnectTimeMillis; // visible for tests
-  final long maxReconnectTimeMillis; // visible for tests
-  final long backoffResetThresholdMillis; // visible for tests
-  private volatile String lastEventId;
-  final AsyncEventHandler handler; // visible for tests
-  private final ConnectionErrorHandler connectionErrorHandler;
-  final boolean streamEventData;   // visible for tests
-  final Set<String> expectFields;  // visible for tests
+  private final Object sleepNotifier = new Object();
+  
+  // The following final fields are set from the configuration builder.
+  private final ConnectStrategy.Client client;
+  final int readBufferSize;
+  final ErrorStrategy baseErrorStrategy;
+  final RetryDelayStrategy baseRetryDelayStrategy;
+  final long retryDelayResetThresholdMillis;
+  final boolean streamEventData;
+  final Set<String> expectFields;
+  
+  // The following mutable fields are not volatile because they should only be
+  // accessed from the thread that is reading from EventSource.
+  private EventParser eventParser;
+  ErrorStrategy currentErrorStrategy;
+  RetryDelayStrategy currentRetryDelayStrategy;
+  private long connectedTime;
+  private long disconnectedTime;
+  private StreamEvent nextEvent;
+
+  // These fields are set by the thread that is reading the stream, but can
+  // be modified from other threads if they call stop() or interrupt(). We
+  // use AtomicReference because we need atomicity in updates.
+  private final AtomicReference<Closeable> connectionCloser = new AtomicReference<>();
+  private final AtomicReference<Thread> readingThread = new AtomicReference<>();
   private final AtomicReference<ReadyState> readyState;
-  private final OkHttpClient client;
-  private volatile Call call;
-  private final SecureRandom jitter = new SecureRandom();
+
+  // These fields are written by other threads if they call stop() or interrupt(),
+  // and are read by the thread that is reading the stream.
+  private volatile boolean deliberatelyClosedConnection;
+  private volatile boolean calledStop;
+  
+  // These fields are written by the thread that is reading the stream, and can
+  // be read by other threads to inspect the state of the stream.
+  volatile long baseRetryDelayMillis; // set at config time but may be changed by a "retry:" value
+  private volatile String lastEventId;
+  private volatile URI origin;
+  private volatile long nextReconnectDelayMillis;
 
   EventSource(Builder builder) {
-    this.name = builder.name == null ? "" : builder.name;
     this.logger = builder.logger == null ? LDLogger.none() : builder.logger;
-    this.url = builder.url;
-    this.headers = addDefaultHeaders(builder.headers);
-    this.method = builder.method;
-    this.body = builder.body;
-    this.requestTransformer = builder.requestTransformer;
+    this.client = builder.connectStrategy.createClient(logger);
+    this.origin = client.getOrigin();
     this.lastEventId = builder.lastEventId;
-    this.reconnectTimeMillis = builder.reconnectTimeMillis;
-    this.maxReconnectTimeMillis = builder.maxReconnectTimeMillis;
-    this.backoffResetThresholdMillis = builder.backoffResetThresholdMillis;
+    this.baseErrorStrategy = this.currentErrorStrategy =
+        builder.errorStrategy == null ? ErrorStrategy.alwaysThrow() : builder.errorStrategy;
+    this.baseRetryDelayStrategy = this.currentRetryDelayStrategy =
+        (builder.retryDelayStrategy == null ? RetryDelayStrategy.defaultStrategy() :
+          builder.retryDelayStrategy);
+    this.baseRetryDelayMillis = builder.retryDelayMillis;
+    this.retryDelayResetThresholdMillis = builder.retryDelayResetThresholdMillis;
     this.streamEventData = builder.streamEventData;
     this.expectFields = builder.expectFields;
-    
-    ThreadFactory eventsThreadFactory = createThreadFactory("okhttp-eventsource-events", builder.threadPriority);
-    this.eventExecutor = Executors.newSingleThreadExecutor(eventsThreadFactory);
-    ThreadFactory streamThreadFactory = createThreadFactory("okhttp-eventsource-stream", builder.threadPriority);
-    this.streamExecutor = Executors.newSingleThreadExecutor(streamThreadFactory);
-    Semaphore eventThreadSemaphore;
-    if (builder.maxEventTasksInFlight > 0) {
-      eventThreadSemaphore = new Semaphore(builder.maxEventTasksInFlight);
-    } else {
-      eventThreadSemaphore = null;
-    }
-    this.handler = new AsyncEventHandler(this.eventExecutor, builder.handler, logger, eventThreadSemaphore);
-    this.connectionErrorHandler = builder.connectionErrorHandler == null ?
-        ConnectionErrorHandler.DEFAULT : builder.connectionErrorHandler;
     this.readBufferSize = builder.readBufferSize;
     this.readyState = new AtomicReference<>(RAW);
-    this.client = builder.clientBuilder.build();
-  }
-
-  private ThreadFactory createThreadFactory(final String type, final Integer threadPriority) {
-    final ThreadFactory backingThreadFactory = Executors.defaultThreadFactory();
-    final AtomicLong count = new AtomicLong(0);
-    return runnable -> {
-      Thread thread = backingThreadFactory.newThread(runnable);
-      thread.setName(format(Locale.ROOT, "%s-[%s]-%d", type, name, count.getAndIncrement()));
-      thread.setDaemon(true);
-      if (threadPriority != null) {
-        thread.setPriority(threadPriority);
-      }
-      return thread;
-    };
   }
 
   /**
-   * Attempts to connect to the remote event source if not already connected. This method returns
-   * immediately; the connection happens on a worker thread.
+   * Returns the stream URI.
+   *
+   * @return the stream URI
+   * @since 4.0.0
    */
-  public void start() {
-    if (!readyState.compareAndSet(RAW, CONNECTING)) {
-      logger.info("Start method called on this already-started EventSource object. Doing nothing");
-      return;
-    }
-    logger.debug("readyState change: {} -> {}", RAW, CONNECTING);
-    logger.info("Starting EventSource client using URI: {}", url);
-    streamExecutor.execute(this::run);
+  public URI getOrigin() {
+    return origin;
   }
   
   /**
-   * Drops the current stream connection (if any) and attempts to reconnect.
-   * <p>
-   * This method returns immediately after dropping the current connection; the reconnection happens on
-   * a worker thread.
-   * <p>
-   * If a connection attempt is already in progress but has not yet connected, or if {@link #close()} has
-   * previously been called, this method has no effect. If {@link #start()} has never been called, it is
-   * the same as calling {@link #start()}.
+   * Returns the logger that this EventSource is using.
+   *
+   * @return the logger
+   * @see Builder#logger(LDLogger)
+   * @since 4.0.0
    */
-  public void restart() {
-    ReadyState previousState = readyState.getAndUpdate(t -> t == ReadyState.OPEN ? ReadyState.CLOSED : t);
-    if (previousState == OPEN) {
-      closeCurrentStream(previousState);
-    } else if (previousState == RAW) {
-      start();
-    }
-    // if already connecting or already shutdown or in the process of closing, do nothing
+  public LDLogger getLogger() {
+    return logger;
   }
-  
+
   /**
    * Returns an enum indicating the current status of the connection.
+   *
    * @return a {@link ReadyState} value
    */
   public ReadyState getState() {
     return readyState.get();
-  }
-
-  /**
-   * Drops the current stream connection (if any) and permanently shuts down the EventSource.
-   */
-  @Override
-  public void close() {
-    ReadyState currentState = readyState.getAndSet(SHUTDOWN);
-    logger.debug("readyState change: {} -> {}", currentState, SHUTDOWN);
-    if (currentState == SHUTDOWN) {
-      return;
-    }
-    
-    closeCurrentStream(currentState);
-
-    eventExecutor.shutdown();
-    streamExecutor.shutdown();
-
-    // COVERAGE: these null guards are here for safety but in practice the values are never null and there
-    // is no way to cause them to be null in unit tests
-    if (client.connectionPool() != null) {
-      client.connectionPool().evictAll();
-    }
-    if (client.dispatcher() != null) {
-      client.dispatcher().cancelAll();
-      if (client.dispatcher().executorService() != null) {
-        client.dispatcher().executorService().shutdownNow();
-      }
-    }
-  }
-
-  /**
-   * Block until all underlying threads have terminated and resources have been released.
-   *
-   * @param timeout maximum time to wait for everything to shut down, in whatever time unit is specified
-   *   by {@code timeUnit}
-   * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
-   * @return {@code true} if all thread pools terminated within the specified timeout, {@code false} otherwise.
-   * @throws InterruptedException if this thread is interrupted while blocking
-   */
-  public boolean awaitClosed(long timeout, TimeUnit timeUnit) throws InterruptedException {
-    long timeoutMillis = millisFromTimeUnit(timeout, timeUnit);
-    final long deadline = System.currentTimeMillis() + timeoutMillis;
-
-    if (!eventExecutor.awaitTermination(timeoutMillis, TimeUnit.MILLISECONDS)) {
-      return false;
-    }
-
-    long shutdownTimeoutMills = Math.max(0, deadline - System.currentTimeMillis());
-    if (!streamExecutor.awaitTermination(shutdownTimeoutMills, TimeUnit.MILLISECONDS)) {
-      return false; // COVERAGE: this condition can't be reproduced in unit tests
-    }
-
-    if (client.dispatcher().executorService() != null) {
-      shutdownTimeoutMills = Math.max(0, deadline - System.currentTimeMillis());
-      if (!client.dispatcher().executorService().awaitTermination(shutdownTimeoutMills, TimeUnit.MILLISECONDS)) {
-        return false; // COVERAGE: this condition can't be reproduced in unit tests
-      }
-    }
-
-    return true;
-  }
-
-  private void closeCurrentStream(ReadyState previousState) {
-    if (previousState == ReadyState.OPEN) {
-      handler.onClosed();
-    }
-
-    if (call != null) {
-      // The call.cancel() must precede the bufferedSource.close().
-      // Otherwise, an IllegalArgumentException "Unbalanced enter/exit" error is thrown by okhttp.
-      // https://github.com/google/ExoPlayer/issues/1348
-      call.cancel();
-      logger.debug("call cancelled");
-    }
-  }
-  
-  Request buildRequest() {
-    Request.Builder builder = new Request.Builder()
-        .headers(headers)
-        .url(url)
-        .method(method, body);
-
-    if (lastEventId != null && !lastEventId.isEmpty()) {
-      builder.addHeader("Last-Event-ID", lastEventId);
-    }
-    
-    Request request = builder.build();
-    return requestTransformer == null ? request : requestTransformer.transformRequest(request);
-  }
-
-  private void run() {
-    AtomicLong connectedTime = new AtomicLong();
-    int reconnectAttempts = 0;
-    
-    try {
-      while (!Thread.currentThread().isInterrupted() && readyState.get() != SHUTDOWN) {
-        if (reconnectAttempts == 0) {
-          reconnectAttempts++;
-        } else {
-          reconnectAttempts = maybeReconnectDelay(reconnectAttempts, connectedTime.get());
-        }
-        newConnectionAttempt(connectedTime);
-      }
-    } catch (RejectedExecutionException ignored) {
-      // COVERAGE: there is no way to simulate this condition in unit tests
-      call = null;
-      logger.debug("Rejected execution exception ignored: {}", ignored);
-      // During shutdown, we tried to send a message to the event handler
-      // Do not reconnect; the executor has been shut down
-    }
-  }
-
-  private int maybeReconnectDelay(int reconnectAttempts, long connectedTime) {
-    if (reconnectTimeMillis <= 0) {
-      return reconnectAttempts;
-    }
-    
-    int counter = reconnectAttempts;
-    
-    // Reset the backoff if we had a successful connection that stayed good for at least
-    // backoffResetThresholdMs milliseconds.
-    if (connectedTime > 0 && (System.currentTimeMillis() - connectedTime) >= backoffResetThresholdMillis) {
-      counter = 1;
-    }
-    
-    try {
-      long sleepTimeMillis = backoffWithJitterMillis(counter);
-      logger.info("Waiting {} milliseconds before reconnecting...", sleepTimeMillis);
-      Thread.sleep(sleepTimeMillis);
-    } catch (InterruptedException ignored) { // COVERAGE: no way to cause this in unit tests
-    }
-    
-    return ++counter;
-  }
-  
-  private void newConnectionAttempt(AtomicLong connectedTime) {
-    ConnectionErrorHandler.Action errorHandlerAction = ConnectionErrorHandler.Action.PROCEED;
-
-    ReadyState stateBeforeConnecting = readyState.getAndSet(CONNECTING);
-    logger.debug("readyState change: {} -> {}", stateBeforeConnecting, CONNECTING);
-    
-    connectedTime.set(0);
-    call = client.newCall(buildRequest());
-    
-    try {
-      try (Response response = call.execute()) {
-        if (response.isSuccessful()) {
-          connectedTime.set(System.currentTimeMillis());
-          handleSuccessfulResponse(response);
-
-          // If handleSuccessfulResponse returned without throwing an exception, it means the server
-          // ended the stream. We don't call the handler's onError() method in this case; but we will
-          // call the ConnectionErrorHandler with an EOFException, in case it wants to do something
-          // special in this scenario (like choose not to retry the connection). However, first we
-          // should check the state in case we've been deliberately closed from elsewhere.
-          ReadyState state = readyState.get();
-          if (state != SHUTDOWN && state != CLOSED) {
-            logger.warn("Connection unexpectedly closed");
-            errorHandlerAction = connectionErrorHandler.onConnectionError(new EOFException());
-          }
-        } else {
-          logger.debug("Unsuccessful response: {}", response);
-          errorHandlerAction = dispatchError(new UnsuccessfulResponseException(response.code()));
-        }
-      }
-    } catch (IOException e) {
-      ReadyState state = readyState.get();
-      if (state != SHUTDOWN && state != CLOSED) {
-        logger.debug("Connection problem: {}", e);
-        errorHandlerAction = dispatchError(e);
-      }
-    } finally {
-      if (errorHandlerAction == ConnectionErrorHandler.Action.SHUTDOWN) {
-        logger.info("Connection has been explicitly shut down by error handler");
-        close();
-      } else {
-        boolean wasOpen = readyState.compareAndSet(OPEN, CLOSED);
-        boolean wasConnecting = readyState.compareAndSet(CONNECTING, CLOSED);
-        if (wasOpen) {
-          logger.debug("readyState change: {} -> {}", OPEN, CLOSED);  
-          handler.onClosed(); 
-        } else if (wasConnecting) {
-          logger.debug("readyState change: {} -> {}", CONNECTING, CLOSED);  
-        }
-      }
-    }
-  }
-  
-  // Read the response body as an SSE stream and dispatch each received event to the EventHandler.
-  // This function exits in one of two ways:
-  // 1. A normal return - this means the response simply ended.
-  // 2. Throwing an IOException - there was an unexpected connection failure.
-  private void handleSuccessfulResponse(Response response) throws IOException {
-    ConnectionHandler connectionHandler = new ConnectionHandler() {
-      @Override
-      public void setReconnectTimeMillis(long reconnectTimeMillis) {
-        EventSource.this.setReconnectTimeMillis(reconnectTimeMillis);
-      }
-      
-      @Override
-      public void setLastEventId(String lastEventId) {
-        EventSource.this.setLastEventId(lastEventId);
-      }
-    };
-
-    ReadyState previousState = readyState.getAndSet(OPEN);
-    if (previousState != CONNECTING) {
-      // COVERAGE: there is no way to simulate this condition in unit tests
-      logger.warn("Unexpected readyState change: " + previousState + " -> " + OPEN);
-    } else {
-      logger.debug("readyState change: {} -> {}", previousState, OPEN);
-    }
-    logger.info("Connected to EventSource stream.");
-    handler.onOpen();
-    
-    EventParser parser = new EventParser(
-        response.body().byteStream(),
-        url.uri(),
-        handler,
-        connectionHandler,
-        readBufferSize,
-        streamEventData,
-        expectFields,
-        logger
-        );
-    
-    // COVERAGE: the isInterrupted() condition is not encountered in unit tests and it's unclear if it can ever happen
-    while (!Thread.currentThread().isInterrupted() && !parser.isEof()) {
-      parser.processStream();
-    }
-  }
-  
-  private ConnectionErrorHandler.Action dispatchError(Throwable t) {
-    ConnectionErrorHandler.Action action = connectionErrorHandler.onConnectionError(t);
-    if (action != ConnectionErrorHandler.Action.SHUTDOWN) {
-      handler.onError(t);
-    }
-    return action;
-  }
-
-  long backoffWithJitterMillis(int reconnectAttempts) {
-    long maxTimeLong = Math.min(maxReconnectTimeMillis, reconnectTimeMillis * pow2(reconnectAttempts));
-    // 2^31 milliseconds is much longer than any reconnect time we would reasonably want to use, so we can pin this to int
-    int maxTimeInt = maxTimeLong > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int)maxTimeLong;
-    return maxTimeInt / 2 + jitter.nextInt(maxTimeInt) / 2;
-  }
-
-  private static Headers addDefaultHeaders(Headers custom) {
-    Headers.Builder builder = new Headers.Builder();
-
-    for (String name : defaultHeaders.names()) {
-      if (!custom.names().contains(name)) { // skip the default if they set any custom values for this key
-        for (String value: defaultHeaders.values(name)) {
-          builder.add(name, value);         
-        }
-      }
-    }
-
-    for (String name : custom.names()) {
-      for (String value : custom.values(name)) {
-        builder.add(name, value);
-      }
-    }
-
-    return builder.build();
-  }
-
-  // setReconnectTimeMillis and setLastEventId are used only by our internal ConnectionHandler, in response
-  // to stream events. From an application's point of view, these properties can only be set at
-  // configuration time via the builder.
-  private void setReconnectTimeMillis(long reconnectTimeMillis) {
-    this.reconnectTimeMillis = reconnectTimeMillis;
-  }
-
-  private void setLastEventId(String lastEventId) {
-    this.lastEventId = lastEventId;
   }
 
   /**
@@ -500,189 +170,630 @@ public class EventSource implements Closeable {
   public String getLastEventId() {
     return lastEventId;
   }
-  
+
   /**
-   * Returns the current stream endpoint as an OkHttp HttpUrl.
-   * 
-   * @return the endpoint URL
-   * @since 1.9.0
-   * @see #getUri()
+   * Returns the current base retry delay.
+   * <p>
+   * This is initially set by {@link Builder#retryDelay(long, TimeUnit)}, or
+   * {@link #DEFAULT_RETRY_DELAY_MILLIS} if not specified. It can be overriden by the
+   * stream provider if the stream contains a "retry:" line.
+   * <p>
+   * The actual retry delay for any given reconnection is computed by applying the
+   * configured {@link RetryDelayStrategy} to this value.
+   *
+   * @return the base retry delay in milliseconds
+   * @see #getNextRetryDelayMillis()
+   * @since 4.0.0
    */
-  public HttpUrl getHttpUrl() {
-    return this.url;
+  public long getBaseRetryDelayMillis() {
+    return baseRetryDelayMillis;
   }
   
   /**
-   * Returns the current stream endpoint as a java.net.URI.
-   * 
-   * @return the endpoint URI
-   * @see #getHttpUrl()
+   * Returns the retry delay that will be used for the next reconnection, if the
+   * stream has failed.
+   * <p>
+   * If you have just received a {@link StreamException} or {@link FaultEvent}, this
+   * value tells you how long EventSource will sleep before reconnecting, if you tell
+   * it to reconnect by calling {@link #start()} or by trying to read another event.
+   * The value is computed by applying the configured {@link RetryDelayStrategy} to
+   * the current value of {@link #getBaseRetryDelayMillis()}.
+   * <p>
+   * At any other time, the value is undefined.
+   *
+   * @return the next retry delay in milliseconds
+   * @see #getBaseRetryDelayMillis()
+   * @since 4.0.0
    */
-  public URI getUri() {
-    return this.url.uri();
+  public long getNextRetryDelayMillis() {
+    return nextReconnectDelayMillis;
+  }
+  
+  /**
+   * Attempts to start the stream if it is not already active.
+   * <p>
+   * If there is not an active stream connection, this method attempts to start one using
+   * the previously configured parameters. If successful, it returns and you can proceed
+   * to read events. You should only read events on the same thread where you called
+   * {@link #start()}.
+   * <p>
+   * If the connection fails, the behavior depends on the configured {@link ErrorStrategy}.
+   * The default strategy is to throw a {@link StreamException}, but you can configure it
+   * to continue instead, in which case {@link #start()} will keep retrying until the
+   * ErrorStrategy says to give up.
+   * <p>
+   * If the stream was previously active and then failed, {@link #start()} will sleep for
+   * some amount of time-- the retry delay-- before trying to make the connection. The
+   * retry delay is determined by several factors: see {@link Builder#retryDelay(long, TimeUnit)},
+   * {@link Builder#retryDelayStrategy(RetryDelayStrategy)}, and
+   * {@link Builder#retryDelayResetThreshold(long, TimeUnit)}.
+   * @throws StreamException
+   * <p>
+   * You do not necessarily need to call this method; it is implicitly called if you try
+   * to read an event when the stream is not active. Call it only if you specifically want
+   * to confirm that the stream is active before you try to read an event.
+   * <p>
+   * If the stream is already active, calling this method has no effect.
+   *
+   * @throws StreamException if the connection attempt failed
+   */
+  public void start() throws StreamException {
+    tryStart(false);
+  }
+  
+  private FaultEvent tryStart(boolean canReturnFaultEvent) throws StreamException {
+    if (eventParser != null) {
+      return null;
+    }
+    readingThread.set(Thread.currentThread());
+
+    while (true) {
+      StreamException exception = null;
+      
+      if (nextReconnectDelayMillis > 0) {
+        long delayNow = disconnectedTime == 0 ? nextReconnectDelayMillis :
+          (nextReconnectDelayMillis - (System.currentTimeMillis() - disconnectedTime));
+        if (delayNow > 0) {
+          logger.info("Waiting {} milliseconds before reconnecting", delayNow);
+          try {
+            synchronized (sleepNotifier) {
+              if (!deliberatelyClosedConnection) {
+                sleepNotifier.wait(delayNow);
+              }
+              // If interrupt(), stop(), or close() is called while we're waiting, we will
+              // trigger an early exit from this wait by calling sleepNotifier.notify().
+            }
+          } catch (InterruptedException e) {
+            // Thread.interrupt() should also have the effect of making us stop waiting
+            logger.debug("EventSource thread was interrupted during start()");
+            deliberatelyClosedConnection = true;
+            Thread.interrupted(); // clear interrupted state
+          }
+          // Check if deliberatelyClosedConnection might have been set during that wait
+          if (deliberatelyClosedConnection) {
+            exception = new StreamClosedByCallerException();
+          }
+        }
+      }
+      
+      ConnectStrategy.Client.Result clientResult = null;
+      
+      if (exception == null) {
+        readyState.set(ReadyState.CONNECTING);
+        
+        connectedTime = 0;
+        deliberatelyClosedConnection = calledStop = false;
+        
+        try {
+          clientResult = client.connect(lastEventId);
+        } catch (StreamException e) {
+          exception = e;
+        }
+      }
+      
+      if (exception != null) {
+        disconnectedTime = System.currentTimeMillis();
+        computeReconnectDelay();
+        if (applyErrorStrategy(exception) == ErrorStrategy.Action.CONTINUE) {
+          // The ErrorStrategy told us to CONTINUE rather than throwing an exception.
+          if (canReturnFaultEvent) {
+            return new FaultEvent(exception);
+          }
+          // If canReturnFaultEvent is false, it means the caller explicitly called start(),
+          // in which case there's no way to return a FaultEvent so we just keep retrying
+          // transparently.
+          continue;
+        }
+        // The ErrorStrategy told us to THROW rather than CONTINUE. 
+        throw exception;
+      }
+      
+      
+      connectionCloser.set(clientResult.getCloser());
+      origin = clientResult.getOrigin() == null ? client.getOrigin() : clientResult.getOrigin();
+      connectedTime = System.currentTimeMillis();
+      logger.debug("Connected to SSE stream");
+      
+      eventParser = new EventParser(
+          clientResult.getInputStream(),
+          clientResult.getOrigin(),
+          readBufferSize,
+          streamEventData,
+          expectFields,
+          logger
+          );
+      
+      readyState.set(ReadyState.OPEN);
+
+      currentErrorStrategy = baseErrorStrategy;
+      return null;
+    }
+  }
+  
+  /**
+   * Attempts to receive a message from the stream.
+   * <p>
+   * If the stream is not already active, this calls {@link #start()} to establish
+   * a connection.
+   * <p>
+   * As long as the stream is active, the method blocks until a message is available.
+   * If the stream fails, the default behavior is to throw a {@link StreamException},
+   * but you can configure an {@link ErrorStrategy} to allow the client to retry
+   * transparently instead.
+   * <p>
+   * This method must be called from the same thread that first started using the
+   * stream (that is, the thread that called {@link #start()} or read the first event).
+   * 
+   * @return an SSE message
+   * @throws StreamException if there is an error and retry is not enabled
+   * @see #readAnyEvent()
+   * @see #messages()
+   * @since 4.0.0
+   */
+  public MessageEvent readMessage() throws StreamException {
+    while (true) {
+      StreamEvent event = readAnyEvent();
+      if (event instanceof MessageEvent) {
+        return (MessageEvent)event;
+      }
+    }
+  }
+  
+  /**
+   * Attempts to receive an event of any kind from the stream.
+   * <p>
+   * This is similar to {@link #readMessage()}, except that instead of specifically
+   * requesting a {@link MessageEvent} it also applies to the other subclasses of
+   * {@link StreamEvent}: {@link StartedEvent}, {@link FaultEvent}, and {@link
+   * CommentEvent}. Use this method if you want to be informed of any of those
+   * occurrences.
+   * <p>
+   * The error behavior is the same as {@link #readMessage()}, except that if the
+   * {@link ErrorStrategy} is configured to let the client continue with an
+   * automatic retry, you will receive a {@link FaultEvent} describing the error
+   * first, and then a {@link StartedEvent} once the stream is reconnected.
+   * <p>
+   * This method must be called from the same thread that first started using the
+   * stream (that is, the thread that called {@link #start()} or read the first event).
+   *
+   * @return an event
+   * @throws StreamException if there is an error and retry is not enabled
+   * @see #readMessage()
+   * @see #anyEvents()
+   * @since 4.0.0
+   */
+  public StreamEvent readAnyEvent() throws StreamException {
+    return requireEvent();
   }
 
-  private static long millisFromTimeUnit(long duration, TimeUnit timeUnit) {
-    return timeUnitOrDefault(timeUnit).toMillis(duration);
+  /**
+   * Returns an iterable sequence of SSE messages.
+   * <p>
+   * This is similar to calling {@link #readMessage()} in a loop. If the stream
+   * has not already been started, it also starts the stream.
+   * <p>
+   * The error behavior is different from {@link #readMessage()}: if an error occurs
+   * and the {@link ErrorStrategy} does not allow the client to continue, it simply
+   * stops iterating, rather than throwing an exception. If you need to be able to
+   * specifically detect errors, use {@link #readMessage()}.
+   * <p>
+   * This method must be called from the same thread that first started using the
+   * stream (that is, the thread that called {@link #start()} or read the first event).
+   *
+   * @return a sequence of SSE messages
+   * @see #readAnyEvent()
+   * @see #messages()
+   * @since 4.0.0
+   */
+  public Iterable<MessageEvent> messages() {
+    return new Iterable<MessageEvent>() {
+      @Override
+      public Iterator<MessageEvent> iterator() {
+        return new IteratorImpl<>(MessageEvent.class);
+      }
+    };
+  }
+  
+  /**
+   * Returns an iterable sequence of events.
+   * <p>
+   * This is similar to calling {@link #readAnyEvent()} in a loop. If the stream
+   * has not already been started, it also starts the stream.
+   * <p>
+   * The error behavior is different from {@link #readAnyEvent()}: if an error occurs
+   * and the {@link ErrorStrategy} does not allow the client to continue, it simply
+   * stops iterating, rather than throwing an exception. If you need to be able to
+   * specifically detect errors, use {@link #readAnyEvent()} (or, use the
+   * {@link ErrorStrategy} mechanism to cause errors to be reported as
+   * {@link FaultEvent}s).
+   * <p>
+   * This method must be called from the same thread that first started using the
+   * stream (that is, the thread that called {@link #start()} or read the first event).
+   *
+   * @return a sequence of events
+   * @see #readAnyEvent()
+   * @see #messages()
+   * @since 4.0.0
+   */
+  public Iterable<StreamEvent> anyEvents() {
+    return new Iterable<StreamEvent>() {
+      @Override
+      public Iterator<StreamEvent> iterator() {
+        return new IteratorImpl<>(StreamEvent.class);
+      }
+    };
   }
 
-  private static TimeUnit timeUnitOrDefault(TimeUnit timeUnit) {
-    return timeUnit == null ? TimeUnit.MILLISECONDS : timeUnit;
-  }
-  
   /**
-   * Interface for an object that can modify the network request that the EventSource will make.
-   * Use this in conjunction with {@link EventSource.Builder#requestTransformer(EventSource.RequestTransformer)}
-   * if you need to set request properties other than the ones that are already supported by the builder (or if,
-   * for whatever reason, you need to determine the request properties dynamically rather than setting them
-   * to fixed values initially). For example:
-   * <pre><code>
-   * public class RequestTagger implements EventSource.RequestTransformer {
-   *   public Request transformRequest(Request input) {
-   *     return input.newBuilder().tag("hello").build();
-   *   }
-   * }
-   * 
-   * EventSource es = new EventSource.Builder(handler, uri).requestTransformer(new RequestTagger()).build();
-   * </code></pre>
-   * 
-   * @since 1.9.0
+   * Stops the stream connection if it is currently active.
+   * <p>
+   * Unlike the reading methods, you are allowed to call this method from any
+   * thread. If you are reading events on a different thread, and automatic
+   * retries are not enabled by an {@link ErrorStrategy}, the other thread will
+   * receive a {@link StreamClosedByCallerException}.
+   * <p>
+   * The difference between this method and {@link #stop()} is only relevant if
+   * automatic retries are enabled. In this case, if you are using the
+   * {@link #messages()} or {@link #anyEvents()} iterator to read events, calling
+   * {@link #interrupt()} will cause the stream to be closed and then immediately
+   * reconnected, whereas {@link #stop()} will close it and then the iterator
+   * will end. In either case, if you explicitly try to read another event it
+   * will start the stream again.
+   * <p>
+   * If the stream is not currently active, calling this method has no effect.
+   *
+   * @since 4.0.0
+   * @see #stop()
+   * @see #start()
    */
-  public static interface RequestTransformer {
-    /**
-     * Returns a request that is either the same as the input request or based on it. When
-     * this method is called, EventSource has already set all of its standard properties on
-     * the request.
-     * 
-     * @param input the original request
-     * @return the request that will be used
-     */
-    public Request transformRequest(Request input);
+  public void interrupt() {
+    closeCurrentStream(true, false);
+  }
+
+  /**
+   * Stops the stream connection if it is currently active.
+   * <p>
+   * Unlike the reading methods, you are allowed to call this method from any
+   * thread. If you are reading events on a different thread, and automatic
+   * retries are not enabled by an {@link ErrorStrategy}, the other thread will
+   * receive a {@link StreamClosedByCallerException}.
+   * <p>
+   * The difference between this method and {@link #interrupt()} is only relevant if
+   * automatic retries are enabled. In this case, if you are using the
+   * {@link #messages()} or {@link #anyEvents()} iterator to read events, calling
+   * {@link #interrupt()} will cause the stream to be closed and then immediately
+   * reconnected, whereas {@link #stop()} will close it and then the iterator
+   * will end. In either case, if you explicitly try to read another event it
+   * will start the stream again.
+   * <p>
+   * If the stream is not currently active, calling this method has no effect.
+   *
+   * @since 4.0.0
+   * @see #interrupt()
+   * @see #start()
+   */
+  public void stop() {
+    closeCurrentStream(true, true);
+  }
+
+  /**
+   * Permanently shuts down the EventSource.
+   * <p>
+   * This is similar to {@link #stop()} except that it also releases any resources that
+   * the EventSource was maintaining in general, such as an HTTP connection pool. Do
+   * not try to use the EventSource after closing it.
+   */
+  @Override
+  public void close() {
+    ReadyState currentState = readyState.getAndSet(SHUTDOWN);
+    if (currentState == SHUTDOWN) {
+      return;
+    }
+    
+    closeCurrentStream(true, true);
+    try {
+      client.close();
+    } catch (IOException e) {}
+  }
+
+  /**
+   * Blocks until all underlying threads have terminated and resources have been released.
+   *
+   * @param timeout maximum time to wait for everything to shut down, in whatever time
+   *   unit is specified by {@code timeUnit}
+   * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
+   * @return {@code true} if all thread pools terminated within the specified timeout,
+   *   {@code false} otherwise
+   * @throws InterruptedException if this thread is interrupted while blocking
+   */
+  public boolean awaitClosed(long timeout, TimeUnit timeUnit) throws InterruptedException {
+    return client.awaitClosed(millisFromTimeUnit(timeout, timeUnit));
+  }
+
+  // Iterator implementation used by messages() and anyEvents()
+  private class IteratorImpl<T extends StreamEvent> implements Iterator<T> {
+    private final Class<T> filterClass;
+    
+    IteratorImpl(Class<T> filterClass) {
+      this.filterClass = filterClass;
+      calledStop = false;
+    }
+    
+    public boolean hasNext() {
+      while (true) {
+        if (nextEvent != null && filterClass.isAssignableFrom(nextEvent.getClass())) {
+          return true;
+        }
+        if (calledStop) {
+          calledStop = false;
+          return false;
+        }
+        try {
+          nextEvent = requireEvent();
+        } catch (StreamException e) {
+          return false;
+        }
+      }
+    }
+    
+    public T next() {
+      while (nextEvent == null || !filterClass.isAssignableFrom(nextEvent.getClass()) && hasNext()) {}
+      @SuppressWarnings("unchecked")
+      T event = (T)nextEvent;
+      nextEvent = null;
+      return event;
+    }
+  }
+
+  private StreamEvent requireEvent() throws StreamException {
+    readingThread.set(Thread.currentThread());
+    
+    try {
+      while (true) {
+        // Reading an event implies starting the stream if it isn't already started.
+        // We might also be restarting since we could have been interrupted at any time.
+        if (eventParser == null) {
+          FaultEvent faultEvent = tryStart(true);
+          return faultEvent == null ? new StartedEvent() : faultEvent;
+        }
+        StreamEvent event = eventParser.nextEvent();
+        if (event instanceof SetRetryDelayEvent) {
+          // SetRetryDelayEvent means the stream contained a "retry:" line. We don't
+          // surface this to the caller, we just apply the new delay and move on.
+          baseRetryDelayMillis = ((SetRetryDelayEvent)event).getRetryMillis();
+          resetRetryDelayStrategy();
+          continue;
+        }
+        if (event instanceof MessageEvent) {
+          MessageEvent me = (MessageEvent)event;
+          if (me.getLastEventId() != null) {
+            lastEventId = me.getLastEventId();
+          }
+        }
+        return event;
+      }
+    } catch (StreamException e) {
+      readyState.set(ReadyState.CLOSED);
+      if (deliberatelyClosedConnection) {
+        // If the stream was explicitly closed from another thread, that'll likely show up as
+        // an I/O error, but we don't want to report it as one.
+        e = new StreamClosedByCallerException();
+        deliberatelyClosedConnection = false;
+      }
+      disconnectedTime = System.currentTimeMillis();
+      closeCurrentStream(false, false);
+      eventParser = null;
+      computeReconnectDelay();
+      if (applyErrorStrategy(e) == ErrorStrategy.Action.CONTINUE) {
+        return new FaultEvent(e);
+      }
+      throw e;
+    }
+  }
+  
+  private void resetRetryDelayStrategy() {
+    logger.debug("Resetting retry delay strategy to initial state");
+    currentRetryDelayStrategy = baseRetryDelayStrategy;
+  }
+
+  private ErrorStrategy.Action applyErrorStrategy(StreamException e) {
+    ErrorStrategy.Result errorStrategyResult = currentErrorStrategy.apply(e);
+    if (errorStrategyResult.getNext() != null) {
+      currentErrorStrategy = errorStrategyResult.getNext();
+    }
+    return errorStrategyResult.getAction();
+  }
+  
+  private void computeReconnectDelay() {
+    if (retryDelayResetThresholdMillis > 0 && connectedTime != 0) {
+      long connectionDurationMillis = System.currentTimeMillis() - connectedTime;
+      if (connectionDurationMillis >= retryDelayResetThresholdMillis) {
+        resetRetryDelayStrategy();
+      }
+    }
+    RetryDelayStrategy.Result result =
+        currentRetryDelayStrategy.apply(baseRetryDelayMillis);
+    nextReconnectDelayMillis = result.getDelayMillis();
+    if (result.getNext() != null) {
+      currentRetryDelayStrategy = result.getNext();
+    }
+  }
+
+  private boolean closeCurrentStream(boolean deliberatelyInterrupted, boolean shouldStopIterating) {
+    Closeable oldConnectionCloser = this.connectionCloser.getAndSet(null);
+    Thread oldReadingThread = readingThread.getAndSet(null);
+    if (oldConnectionCloser == null && oldReadingThread == null) {
+      return false;
+    }
+    
+    synchronized (sleepNotifier) { // this synchronization prevents a race condition in start()
+      if (deliberatelyInterrupted) {
+        this.deliberatelyClosedConnection = true;
+      }
+      if (shouldStopIterating) {
+        this.calledStop = true;
+      }
+      if (oldConnectionCloser != null) {
+        try {
+          oldConnectionCloser.close();
+          logger.debug("Closed request");
+        } catch (IOException e) {
+          logger.warn("Unexpected error when closing connection: {}", LogValues.exceptionSummary(e));
+        }
+      }
+      if (oldReadingThread == Thread.currentThread()) {
+        eventParser = null;
+        readyState.compareAndSet(ReadyState.OPEN, ReadyState.CLOSED);
+        readyState.compareAndSet(ReadyState.CONNECTING, ReadyState.CLOSED);
+        // If the current thread is not the reading thread, these fields will be updated the
+        // next time the reading thread tries to do a read.
+      }
+      
+      sleepNotifier.notify(); // in case we're sleeping in a reconnect delay, wake us up
+    }
+    return true;
   }
   
   /**
-   * Builder for {@link EventSource}.
+   * Builder for configuring {@link EventSource}.
    */
   public static final class Builder {
-    private String name;
-    private long reconnectTimeMillis = DEFAULT_RECONNECT_TIME_MILLIS;
-    private long maxReconnectTimeMillis = DEFAULT_MAX_RECONNECT_TIME_MILLIS;
-    private long backoffResetThresholdMillis = DEFAULT_BACKOFF_RESET_THRESHOLD_MILLIS;
+    private final ConnectStrategy connectStrategy; // final because it's mandatory, set at constructor time
+    private ErrorStrategy errorStrategy;
+    private RetryDelayStrategy retryDelayStrategy;
+    private long retryDelayMillis = DEFAULT_RETRY_DELAY_MILLIS;
+    private long retryDelayResetThresholdMillis = DEFAULT_RETRY_DELAY_RESET_THRESHOLD_MILLIS;
     private String lastEventId;
-    private final HttpUrl url;
-    private final EventHandler handler;
-    private ConnectionErrorHandler connectionErrorHandler = ConnectionErrorHandler.DEFAULT;
-    private Integer threadPriority = null;
-    private Headers headers = Headers.of();
-    private Proxy proxy;
-    private Authenticator proxyAuthenticator = null;
-    private String method = "GET";
-    private RequestTransformer requestTransformer = null;
-    private RequestBody body = null;
-    private OkHttpClient.Builder clientBuilder;
     private int readBufferSize = DEFAULT_READ_BUFFER_SIZE;
     private LDLogger logger = null;
-    private int maxEventTasksInFlight = 0;
     private boolean streamEventData;
     private Set<String> expectFields = null;
-    
-    /**
-     * Creates a new builder.
-     * 
-     * @param handler the event handler
-     * @param uri the endpoint as a java.net.URI
-     * @throws IllegalArgumentException if either argument is null, or if the endpoint is not HTTP or HTTPS
-     */
-    public Builder(EventHandler handler, URI uri) {
-      this(handler, uri == null ? null : HttpUrl.get(uri));
-    }
 
     /**
-     * Creates a new builder.
-     * 
-     * @param handler the event handler
-     * @param url the endpoint as an OkHttp HttpUrl
-     * @throws IllegalArgumentException if either argument is null, or if the endpoint is not HTTP or HTTPS
-     * 
-     * @since 1.9.0
-     */
-    public Builder(EventHandler handler, HttpUrl url) {
-      if (handler == null) {
-        throw new IllegalArgumentException("handler must not be null");
-      }
-      if (url == null) {
-        throw new IllegalArgumentException("URI/URL must not be null");
-      }
-      this.url = url;
-      this.handler = handler;
-      this.clientBuilder = createInitialClientBuilder();
-    }
-    
-    private static OkHttpClient.Builder createInitialClientBuilder() {
-      OkHttpClient.Builder b = new OkHttpClient.Builder()
-          .connectionPool(new ConnectionPool(1, 1, TimeUnit.SECONDS))
-          .connectTimeout(DEFAULT_CONNECT_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
-          .readTimeout(DEFAULT_READ_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
-          .writeTimeout(DEFAULT_WRITE_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
-          .retryOnConnectionFailure(true);
-      try {
-        b.sslSocketFactory(new ModernTLSSocketFactory(), defaultTrustManager());
-      } catch (GeneralSecurityException e) {
-        // TLS is not available, so don't set up the socket factory, swallow the exception
-        // COVERAGE: There is no way to cause this to happen in unit tests
-      }
-      return b;
-    }
-    
-    /**
-     * Set the HTTP method used for this EventSource client to use for requests to establish the EventSource.
+     * Creates a new builder, specifying how it will connect to a stream.
      * <p>
-     * Defaults to "GET".
+     * The {@link ConnectStrategy} will handle all details of how to obtain an
+     * input stream for the EventSource to consume. By default, this is
+     * {@link HttpConnectStrategy}, which makes HTTP requests. To customize the
+     * HTTP behavior, you can use methods of {@link HttpConnectStrategy}:
+     * <pre><code>
+     *     EventSource.Builder builder = new EventSource.Builder(
+     *       ConnectStrategy.http(myStreamUri)
+     *         .headers(myCustomHeaders)
+     *         .connectTimeout(10, TimeUnit.SECONDS)
+     *     );
+     * </code></pre>
+     * <p>
+     * Or, if you want to consume an input stream from some other source, you can
+     * create your own subclass of {@link ConnectStrategy}.
+     * 
+     * @param connectStrategy the object that will manage the input stream;
+     *   must not be null
+     * @since 4.0.0
+     * @see #Builder(URI)
+     * @see #Builder(HttpUrl)
+     * @throws IllegalArgumentException if the argument is null
+     */
+    public Builder(ConnectStrategy connectStrategy) {
+      if (connectStrategy == null) {
+        throw new IllegalArgumentException("connectStrategy must not be null");
+      }
+      this.connectStrategy = connectStrategy;
+    }
+
+    /**
+     * Creates a new builder that connects via HTTP, specifying only the stream URI.
+     * <p>
+     * Use this method if you do not need to configure any HTTP-related properties
+     * besides the URI. To specify a custom HTTP configuration instead, use
+     * {@link #Builder(ConnectStrategy)} with {@link ConnectStrategy#http(URI)}.
      *
-     * @param method the HTTP method name; if null or empty, "GET" is used as the default
-     * @return the builder
+     * @param uri the stream URI
+     * @throws IllegalArgumentException if the argument is null, or if the endpoint
+     *   is not HTTP or HTTPS
+     * @see #Builder(ConnectStrategy)
+     * @see #Builder(URL)
+     * @see #Builder(HttpUrl)
      */
-    public Builder method(String method) {
-      this.method = (method != null && method.length() > 0) ? method.toUpperCase() : "GET";
-      return this;
+    public Builder(URI uri) {
+      this(ConnectStrategy.http(uri));
     }
 
     /**
-     * Sets the request body to be used for this EventSource client to use for requests to establish the EventSource.
-     * 
-     * @param body the body to use in HTTP requests
-     * @return the builder
+     * Creates a new builder that connects via HTTP, specifying only the stream URI.
+     * <p>
+     * This is the same as {@link #Builder(URI)}, but using the {@link URL} type.
+     *
+     * @param url the stream URL
+     * @throws IllegalArgumentException if the argument is null, or if the endpoint
+     *   is not HTTP or HTTPS
+     * @see #Builder(ConnectStrategy)
+     * @see #Builder(URI)
+     * @see #Builder(HttpUrl)
      */
-    public Builder body(RequestBody body) {
-      this.body = body;
-      return this;
+    public Builder(URL url) {
+      this(ConnectStrategy.http(url));
     }
 
     /**
-     * Specifies an object that will be used to customize outgoing requests. See {@link RequestTransformer} for details.
+     * Creates a new builder that connects via HTTP, specifying only the stream URI.
+     * <p>
+     * This is the same as {@link #Builder(URI)}, but using the OkHttp type
+     * {@link HttpUrl}.
      * 
-     * @param requestTransformer the transformer object
-     * @return the builder
+     * @param url the stream URL
+     * @throws IllegalArgumentException if the argument is null, or if the endpoint
+     *   is not HTTP or HTTPS
      * 
      * @since 1.9.0
+     * @see #Builder(ConnectStrategy)
+     * @see #Builder(URI)
+     * @see #Builder(URL)
      */
-    public Builder requestTransformer(RequestTransformer requestTransformer) {
-      this.requestTransformer = requestTransformer;
-      return this;
+    public Builder(HttpUrl url) {
+      this(ConnectStrategy.http(url));
     }
     
     /**
-     * Set the name for this EventSource client to be used when naming thread pools.
-     * This is mainly useful when multiple EventSource clients exist within the same process.
-     *
-     * @param name the name (without any whitespaces)
+     * Specifies a strategy for determining whether to handle errors transparently
+     * or throw them as exceptions.
+     * <p>
+     * By default, any failed connection attempt, or failure of an existing connection,
+     * will be thrown as a {@link StreamException} when you try to use the stream. You
+     * may instead use alternate {@link ErrorStrategy} implementations, such as
+     * {@link ErrorStrategy#alwaysContinue()}, or a custom implementation, to allow
+     * EventSource to continue after an error.
+     *  
+     * @param errorStrategy the object that will control error handling; if null,
+     *   defaults to {@link ErrorStrategy#alwaysThrow()}
      * @return the builder
+     * @since 4.0.0
      */
-    public Builder name(String name) {
-      this.name = name;
+    public Builder errorStrategy(ErrorStrategy errorStrategy) {
+      this.errorStrategy = errorStrategy;
       return this;
     }
-
+    
     /**
      * Sets the ID value of the last event received.
      * <p>
@@ -701,210 +812,74 @@ public class EventSource implements Closeable {
     }
 
     /**
-     * Sets the minimum delay between connection attempts. The actual delay may be slightly less or
-     * greater, since there is a random jitter. When there is a connection failure, the delay will
-     * start at this value and will increase exponentially up to the {@link #maxReconnectTime(long, TimeUnit)}
-     * value with each subsequent failure, unless it is reset as described in
-     * {@link Builder#backoffResetThreshold(long, TimeUnit)}.
+     * Sets the base delay between connection attempts.
+     * <p>
+     * The actual delay may be slightly less or greater, depending on the strategy specified by
+     * {@link #retryDelayStrategy(RetryDelayStrategy)}. The default behavior is to increase the
+     * delay exponentially from this base value on each attempt, up to a configured maximum,
+     * substracting a random jitter; for more details, see {@link DefaultRetryDelayStrategy}.
+     * <p>
+     * If you set the base delay to zero, the backoff logic will not apply-- multiplying by
+     * zero gives zero every time. Therefore, use a zero delay with caution since it could
+     * cause a reconnect storm during a service interruption.
      * 
-     * @param reconnectTime the minimum delay, in whatever time unit is specified by {@code timeUnit}
+     * @param retryDelay the base delay, in whatever time unit is specified by {@code timeUnit}
      * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
      * @return the builder
-     * @see EventSource#DEFAULT_RECONNECT_TIME_MILLIS
+     * @see EventSource#DEFAULT_RETRY_DELAY_MILLIS
+     * @see #retryDelayStrategy(RetryDelayStrategy)
+     * @see #retryDelayResetThreshold(long, TimeUnit)
      */
-    public Builder reconnectTime(long reconnectTime, TimeUnit timeUnit) {
-      reconnectTimeMillis = millisFromTimeUnit(reconnectTime, timeUnit);
+    public Builder retryDelay(long retryDelay, TimeUnit timeUnit) {
+      retryDelayMillis = millisFromTimeUnit(retryDelay, timeUnit);
       return this;
     }
 
     /**
-     * Sets the maximum delay between connection attempts. See {@link #reconnectTime(long, TimeUnit)}.
-     * The default value is 30 seconds.
-     * 
-     * @param maxReconnectTime the maximum delay, in whatever time unit is specified by {@code timeUnit}
-     * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
+     * Specifies a strategy for determining the retry delay after an error.
+     * <p>
+     * Whenever EventSource tries to start a new connection after a stream failure,
+     * it delays for an amount of time that is determined by two parameters: the
+     * base retry delay ({@link #retryDelay(long, TimeUnit)}), and the retry delay
+     * strategy which transforms the base retry delay in some way. The default behavior
+     * is to apply an exponential backoff and jitter. You may instead use a modified
+     * version of {@link DefaultRetryDelayStrategy} to customize the backoff and
+     * jitter, or a custom implementation with any other logic.
+     *  
+     * @param retryDelayStrategy the object that will control retry delays; if null,
+     *   defaults to {@link RetryDelayStrategy#defaultStrategy()}
      * @return the builder
-     * @see EventSource#DEFAULT_MAX_RECONNECT_TIME_MILLIS
+     * @see #retryDelay(long, TimeUnit)
+     * @see #retryDelayResetThreshold(long, TimeUnit)
+     * @since 4.0.0
      */
-    public Builder maxReconnectTime(long maxReconnectTime, TimeUnit timeUnit) {
-      this.maxReconnectTimeMillis = millisFromTimeUnit(maxReconnectTime, timeUnit);
+    public Builder retryDelayStrategy(RetryDelayStrategy retryDelayStrategy) {
+      this.retryDelayStrategy = retryDelayStrategy;
       return this;
     }
 
     /**
-     * Sets the minimum amount of time that a connection must stay open before the EventSource resets its
-     * backoff delay. If a connection fails before the threshold has elapsed, the delay before reconnecting
-     * will be greater than the last delay; if it fails after the threshold, the delay will start over at
-     * the initial minimum value. This prevents long delays from occurring on connections that are only
+     * Sets the minimum amount of time that a connection must stay open before the EventSource resets
+     * its delay strategy.
+     * <p>
+     * When using the default strategy ({@link RetryDelayStrategy#defaultStrategy()}), this means that
+     * the delay before each reconnect attempt will be greater than the last delay unless the current
+     * connection lasted longer than the threshold, in which case the delay will start over at the
+     * initial minimum value. This prevents long delays from occurring on connections that are only
      * rarely restarted.
      *   
-     * @param backoffResetThreshold the minimum time that a connection must stay open to avoid resetting
+     * @param retryDelayResetThreshold the minimum time that a connection must stay open to avoid resetting
      *   the delay, in whatever time unit is specified by {@code timeUnit}
      * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
      * @return the builder
-     * @see EventSource#DEFAULT_BACKOFF_RESET_THRESHOLD_MILLIS
+     * @see EventSource#DEFAULT_RETRY_DELAY_RESET_THRESHOLD_MILLIS
+     * @since 4.0.0
      */
-    public Builder backoffResetThreshold(long backoffResetThreshold, TimeUnit timeUnit) {
-      this.backoffResetThresholdMillis = millisFromTimeUnit(backoffResetThreshold, timeUnit);
+    public Builder retryDelayResetThreshold(long retryDelayResetThreshold, TimeUnit timeUnit) {
+      this.retryDelayResetThresholdMillis = millisFromTimeUnit(retryDelayResetThreshold, timeUnit);
       return this;
     }
 
-    /**
-     * Set the headers to be sent when establishing the EventSource connection.
-     *
-     * @param headers headers to be sent with the EventSource request
-     * @return the builder
-     */
-    public Builder headers(Headers headers) {
-      this.headers = headers;
-      return this;
-    }
-
-    /**
-     * Set a custom HTTP client that will be used to make the EventSource connection.
-     * If you're setting this along with other connection-related items (ie timeouts, proxy),
-     * you should do this first to avoid overwriting values.
-     *
-     * @param client the HTTP client
-     * @return the builder
-     */
-    public Builder client(OkHttpClient client) {
-      this.clientBuilder = client.newBuilder();
-      return this;
-    }
-
-    /**
-     * Set the HTTP proxy address to be used to make the EventSource connection
-     *
-     * @param proxyHost the proxy hostname
-     * @param proxyPort the proxy port
-     * @return the builder
-     */
-    public Builder proxy(String proxyHost, int proxyPort) {
-      proxy = new Proxy(Type.HTTP, new InetSocketAddress(proxyHost, proxyPort));
-      return this;
-    }
-
-    /**
-     * Set the {@link Proxy} to be used to make the EventSource connection.
-     *
-     * @param proxy the proxy
-     * @return the builder
-     */
-    public Builder proxy(Proxy proxy) {
-      this.proxy = proxy;
-      return this;
-    }
-
-    /**
-     * Sets the Proxy Authentication mechanism if needed. Defaults to no auth.
-     *
-     * @param proxyAuthenticator the authentication mechanism
-     * @return the builder
-     */
-    public Builder proxyAuthenticator(Authenticator proxyAuthenticator) {
-      this.proxyAuthenticator = proxyAuthenticator;
-      return this;
-    }
-
-    /**
-     * Sets the connection timeout.
-     *
-     * @param connectTimeout the connection timeout, in whatever time unit is specified by {@code timeUnit}
-     * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
-     * @return the builder
-     * @see EventSource#DEFAULT_CONNECT_TIMEOUT_MILLIS
-     */
-    public Builder connectTimeout(long connectTimeout, TimeUnit timeUnit) {
-      this.clientBuilder.connectTimeout(connectTimeout, timeUnitOrDefault(timeUnit));
-      return this;
-    }
-
-    /**
-     * Sets the write timeout.
-     *
-     * @param writeTimeout the write timeout, in whatever time unit is specified by {@code timeUnit}
-     * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
-     * @return the builder
-     * @see EventSource#DEFAULT_WRITE_TIMEOUT_MILLIS
-     */
-    public Builder writeTimeout(long writeTimeout, TimeUnit timeUnit) {
-      this.clientBuilder.writeTimeout(writeTimeout, timeUnitOrDefault(timeUnit));
-      return this;
-    }
-
-    /**
-     * Sets the read timeout. If a read timeout happens, the {@code EventSource}
-     * will restart the connection.
-     *
-     * @param readTimeout the read timeout, in whatever time unit is specified by {@code timeUnit}
-     * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
-     * @return the builder
-     * @see EventSource#DEFAULT_READ_TIMEOUT_MILLIS
-     */
-    public Builder readTimeout(long readTimeout, TimeUnit timeUnit) {
-      this.clientBuilder.readTimeout(readTimeout, timeUnitOrDefault(timeUnit)); 
-      return this;
-    }
-
-    /**
-     * Sets the {@link ConnectionErrorHandler} that should process connection errors.
-     *
-     * @param handler the error handler
-     * @return the builder
-     */
-    public Builder connectionErrorHandler(ConnectionErrorHandler handler) {
-      this.connectionErrorHandler = handler;
-      return this;
-    }
-
-    /**
-     * Specifies the priority for threads created by {@code EventSource}.
-     * <p>
-     * If this is left unset, or set to {@code null}, threads will inherit the default priority
-     * provided by {@code Executors.defaultThreadFactory()}.
-     * 
-     * @param threadPriority the thread priority, or null to ue the default
-     * @return the builder
-     * @since 2.2.0
-     */
-    public Builder threadPriority(Integer threadPriority) {
-      this.threadPriority = threadPriority;
-      return this;
-    }
-    
-    /**
-     * Specifies any type of configuration actions you want to perform on the OkHttpClient builder.
-     * <p>
-     * {@link ClientConfigurer} is an interface with a single method, {@link ClientConfigurer#configure(okhttp3.OkHttpClient.Builder)},
-     * that will be called with the {@link okhttp3.OkHttpClient.Builder} instance being used by EventSource.
-     * In Java 8, this can be a lambda.
-     * <p>
-     * It is not guaranteed to be called in any particular order relative to other configuration
-     * actions specified by this Builder, so if you are using more than one method, do not attempt
-     * to overwrite the same setting in two ways.
-     * <pre><code>
-     *     // Java 8 example (lambda)
-     *     eventSourceBuilder.clientBuilderActions(b -&gt; {
-     *         b.sslSocketFactory(mySocketFactory, myTrustManager);
-     *     });
-     * 
-     *     // Java 7 example (anonymous class)
-     *     eventSourceBuilder.clientBuilderActions(new EventSource.Builder.ClientConfigurer() {
-     *         public void configure(OkHttpClient.Builder v) {
-     *             b.sslSocketFactory(mySocketFactory, myTrustManager);
-     *         }
-     *     });
-     * </code></pre>
-     * @param configurer a ClientConfigurer (or lambda) that will act on the HTTP client builder
-     * @return the builder
-     * @since 1.10.0
-     */
-    public Builder clientBuilderActions(ClientConfigurer configurer) {
-      configurer.configure(clientBuilder);
-      return this;
-    }
-    
     /**
      * Specifies the fixed size of the buffer that EventSource uses to parse incoming data.
      * <p>
@@ -958,22 +933,6 @@ public class EventSource implements Closeable {
     }
 
     /**
-     * Specifies the maximum number of tasks that can be "in-flight" for the thread executing {@link EventHandler}.
-     * A semaphore will be used to artificially constrain the number of tasks sitting in the queue fronting the
-     * event handler thread. When this limit is reached the stream thread will block until the backpressure passes.
-     * <p>
-     * For backward compatibility reasons the default is "unbounded".
-     *
-     * @param maxEventTasksInFlight the maximum number of tasks/messages that can be in-flight for the {@code EventHandler}
-     * @return the builder
-     * @since 2.5.0
-     */
-    public Builder maxEventTasksInFlight(int maxEventTasksInFlight) {
-      this.maxEventTasksInFlight = maxEventTasksInFlight;
-      return this;
-    }
-    
-    /**
      * Specifies whether EventSource should send a {@link MessageEvent} to the handler as soon as it receives the
      * beginning of the event data, allowing the handler to read the data incrementally with
      * {@link MessageEvent#getDataReader()}.
@@ -991,8 +950,6 @@ public class EventSource implements Closeable {
      * This mode is designed for applications that expect very large data items to be delivered over SSE. Use it
      * with caution, since there are several limitations:
      * <ul>
-     * <li> EventSource cannot continue processing further events on the stream until the handler's
-     * {@link EventHandler#onMessage(String, MessageEvent)} method has returned. </li>
      * <li> The {@link MessageEvent} is constructed as soon as a {@code data:} field appears, so it will only include
      * fields that appeared <i>before</i> {@code data:}. In other words, if the SSE server happens to send {@code data:}
      * first and {@code event:} second, {@link MessageEvent#getEventName()} will <i>not</i> contain the value of
@@ -1064,45 +1021,7 @@ public class EventSource implements Closeable {
      * @return the new EventSource instance
      */
     public EventSource build() {
-      if (proxy != null) {
-        clientBuilder.proxy(proxy);
-      }
-
-      if (proxyAuthenticator != null) {
-        clientBuilder.proxyAuthenticator(proxyAuthenticator);
-      }
-
       return new EventSource(this);
-    }
-
-    protected OkHttpClient.Builder getClientBuilder() {
-      return clientBuilder;
-    }
-
-    private static X509TrustManager defaultTrustManager() throws GeneralSecurityException {
-      TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(
-              TrustManagerFactory.getDefaultAlgorithm());
-      trustManagerFactory.init((KeyStore) null);
-      TrustManager[] trustManagers = trustManagerFactory.getTrustManagers();
-      if (trustManagers.length != 1 || !(trustManagers[0] instanceof X509TrustManager)) {
-        // COVERAGE: There is no way to cause this to happen in unit tests
-        throw new IllegalStateException("Unexpected default trust managers:"
-                + Arrays.toString(trustManagers));
-      }
-      return (X509TrustManager) trustManagers[0];
-    }
-    
-    /**
-     * An interface for use with {@link EventSource.Builder#clientBuilderActions(ClientConfigurer)}.
-     * @since 1.10.0
-     */
-    public static interface ClientConfigurer {
-      /**
-       * This method is called with the OkHttp {@link okhttp3.OkHttpClient.Builder} that will be used for
-       * the EventSource, allowing you to call any configuration methods you want.
-       * @param builder the client builder
-       */
-      public void configure(OkHttpClient.Builder builder);
     }
   }
 }

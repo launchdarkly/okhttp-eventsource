@@ -22,6 +22,7 @@ public class TestScopedLoggerRule extends TestWatcher {
   
   @Override
   protected void failed(Throwable e, Description description) {
+    init();
     for (LogCapture.Message message: logCapture.getMessages()) {
       System.out.println("LOG {" + description.getDisplayName() + "} >>> " + message.toStringWithTimestamp());
     }

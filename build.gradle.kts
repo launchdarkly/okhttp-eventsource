@@ -139,8 +139,9 @@ tasks.jacocoTestCoverageVerification.configure {
             "ModernTLSSocketFactory.createSocket(java.net.InetAddress, int, java.net.InetAddress, int)" to 1,
             "ModernTLSSocketFactory.createSocket(java.net.Socket, java.lang.String, int, boolean)" to 1,
             "ModernTLSSocketFactory.getDefaultCipherSuites()" to 1,
-            "ModernTLSSocketFactory.getSupportedCipherSuites()" to 1
-        )
+            "ModernTLSSocketFactory.getSupportedCipherSuites()" to 1,
+            "background.BackgroundEventSource.dispatchEvent(com.launchdarkly.eventsource.StreamEvent)" to 3
+            )
         
         knownMissedLinesForMethods.forEach { (signature, maxMissedLines) ->
             if (maxMissedLines > 0) {  // < 0 means skip entire method

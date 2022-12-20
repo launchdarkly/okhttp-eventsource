@@ -39,7 +39,11 @@ import okhttp3.HttpUrl;
  * interested in {@link MessageEvent} data, whereas the "anyEvent" methods also provide
  * other kinds of stream information. These are blocking methods with no timeout; if you
  * need a timeout mechanism, consider reading from the stream on a worker thread and
- * using a queue such as {@link BlockingQueue} to consume the messages elsewhere. 
+ * using a queue such as {@link BlockingQueue} to consume the messages elsewhere.
+ * <p>
+ * If, instead of managing your own thread to read from the stream, you would like to have
+ * events pushed to you from a worker thread that the library maintains, use
+ * {@link com.launchdarkly.eventsource.background.BackgroundEventSource}.
  * <p>
  * Note that although {@code EventSource} is named after the JavaScript API that is described
  * in the SSE specification, its behavior is not necessarily identical to standard web browser

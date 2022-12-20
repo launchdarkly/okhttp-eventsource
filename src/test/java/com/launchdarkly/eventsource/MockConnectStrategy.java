@@ -46,14 +46,14 @@ public class MockConnectStrategy extends ConnectStrategy {
   public static abstract class RequestHandler {
     public volatile boolean closed;
     
-    public ConnectStrategy.Client.Result connect(String lastEventId) throws StreamIOException {
+    public ConnectStrategy.Client.Result connect(String lastEventId) throws StreamException {
       return new ConnectStrategy.Client.Result(
           getStream(),
           ORIGIN,
           makeCloser());
     }
 
-    protected abstract InputStream getStream() throws StreamIOException;
+    protected abstract InputStream getStream() throws StreamException;
     
     protected Closeable makeCloser() {
       return new CloserImpl();
@@ -75,10 +75,14 @@ public class MockConnectStrategy extends ConnectStrategy {
   }
 
   public static RequestHandler rejectConnection() {
-    return new ConnectionFailureHandler(new IOException("deliberate error"));
+    return rejectConnection(new IOException("deliberate error"));
   }
   
   public static RequestHandler rejectConnection(IOException exception) {
+    return new ConnectionFailureHandler(new StreamIOException(exception));
+  }
+
+  public static RequestHandler rejectConnection(StreamException exception) {
     return new ConnectionFailureHandler(exception);
   }
   
@@ -134,7 +138,7 @@ public class MockConnectStrategy extends ConnectStrategy {
       closed = true;
     }
 
-    public Result connect(String lastEventId) throws StreamIOException {
+    public Result connect(String lastEventId) throws StreamException {
       if (requestConfigs.size() == 0) {
         throw new IllegalStateException("MockConnectStrategy was not configured for any requests");
       }
@@ -158,15 +162,15 @@ public class MockConnectStrategy extends ConnectStrategy {
   }
   
   private static class ConnectionFailureHandler extends RequestHandler {
-    private final IOException exception;
+    private final StreamException exception;
     
-    ConnectionFailureHandler(IOException exception) {
+    ConnectionFailureHandler(StreamException exception) {
       this.exception = exception;
     }
     
     @Override
-    protected InputStream getStream() throws StreamIOException {
-      throw new StreamIOException(this.exception);
+    protected InputStream getStream() throws StreamException {
+      throw this.exception;
     }
   }
   

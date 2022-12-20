@@ -2,6 +2,34 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [4.0.0] - 2022-12-19
+This release revises the implementation of `EventSource` so that it does not create its own worker threads. The methods for starting and reading a stream now perform synchronous I/O, and the caller is responsible for choosing what thread to start the stream and read the stream on. This makes the core implementation simpler and more efficient, and reduces possibilities for deadlock. If you want to continue using the old asynchronous push model, see the `com.launchdarkly.eventsource.background` package.
+
+The configuration API has also been revised to separate out the HTTP functionality and the backoff/retry logic into subcomponents which can be customized or replaced.
+
+### Added:
+- `EventSource` methods `readMessage()`, `readAnyEvents()`, `messages()`, and `anyEvents()` for synchronously reading events.
+- `EventSource.Builder(ConnectStrategy)` constructor and the `ConnectStrategy` and `HttpConnectStrategy` classes, for customizing connection parameters.
+- `EventSource.Builder(URI)`, `(URL)`, and `(HttpUrl)` constructors, as shortcuts for minimal HTTP configuration.
+- `EventSource.Builder.errorStrategy` and the `ErrorStrategy` class, for customizing error recovery behavior.
+- `EventSource.Builder.retryDelayStrategy` and the `RetryDelayStrategy` and `DefaultRetryDelayStrategy` classes, for customizing or replacing backoff/jitter behavior.
+- `StreamEvent`, `CommentEvent`, `StartedEvent`, and `FaultEvent` classes, representing types of information other than `MessageEvent` that you can read synchronously from the stream.
+- The `com.launchdarkly.eventsource.background` package, containing the `BackgroundEventSource` wrapper for emulating the old push model.
+
+### Changed:
+- `EventSource.Builder.restart` is renamed to `interrupt`, to clarify that the restarting of the stream is not done immediately but only happens if you continue trying to read events after `interrupt()`.
+- `EventSource.Builder.backoffResetThreshold` is renamed to `retryDelayResetThreshold`, to clarify that it applies to whatever kind of `RetryDelayStrategy` is being used even if that is not the default backoff strategy.
+- `EventSource.Builder.reconnectTime` is renamed to `retryDelay`, to clarify that it is describing a duration rather than a moment in time.
+- `UnsuccessfulResponseException` is renamed to `StreamHttpErrorException`, to clarify that it is specifically referring to an HTTP response with an error status.
+- The implementation of `streamEventData` mode is now simpler and no longer uses `PipedInputStream` and `PipedOutputStream` internally.
+
+### Removed:
+- `ConnectionHandler` and `EventSource.Builder.connectionHandler()`: replaced by `ErrorStrategy`.
+- `EventHandler` and the `EventSource.Builder(URI, EventHandler)` constructor: replaced by `BackgroundEventHandler` if you are using `BackgroundEventSource`.
+- `EventSource.Builder` methods `connectTimeout`, `readTimeout`, `writeTimeout`, `method`, `body`, `headers`, `proxy`, `proxyAuthenticator`, and `requestTransformer`: replaced by methods in `HttpConnectStrategy`.
+- `EventSource.Builder.maxReconnect`: replaced by `DefaultRetryDelayStrategy.maxDelay`.
+- `EventSource.Builder.maxEventTasksInFlight`: replaced by an equivalent option in `BackgroundEventSource`.
+
 ## [3.0.0] - 2022-12-02
 This release expands compatibility of the library with Android by removing Java 8 API usages that are not always available in Android. In effect, it restores the broader compatibility of the 1.x version while preserving the other API/functionality improvements that were added in 2.x. It also removes the previous dependency on SLF4J.
 

@@ -8,12 +8,16 @@ import com.launchdarkly.logging.Logs;
 import org.junit.rules.TestWatcher;
 import org.junit.runner.Description;
 
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+
 @SuppressWarnings("javadoc")
 public class TestScopedLoggerRule extends TestWatcher {
   private LogCapture logCapture;
   private LDLogger logger;
+  private BlockingQueue<LogCapture.Message> consumedMessages = new LinkedBlockingQueue<>();
   
-  private void init() {
+  private synchronized void init() {
     if (logCapture == null) {
       logCapture = Logs.capture();
       logger = LDLogger.withAdapter(logCapture, "");
@@ -22,6 +26,10 @@ public class TestScopedLoggerRule extends TestWatcher {
   
   @Override
   protected void failed(Throwable e, Description description) {
+    init();
+    for (LogCapture.Message message: consumedMessages) {
+      System.out.println("LOG {" + description.getDisplayName() + "} >>> " + message.toStringWithTimestamp());
+    }
     for (LogCapture.Message message: logCapture.getMessages()) {
       System.out.println("LOG {" + description.getDisplayName() + "} >>> " + message.toStringWithTimestamp());
     }
@@ -44,6 +52,7 @@ public class TestScopedLoggerRule extends TestWatcher {
       if (m == null) {
         break;
       }
+      consumedMessages.add(m);
       if (m.getLevel() == level && m.getText().contains(substring)) {
         return m.toString();
       }

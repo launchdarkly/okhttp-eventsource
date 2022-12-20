@@ -1,189 +1,237 @@
 package com.launchdarkly.eventsource;
 
-import com.launchdarkly.eventsource.Stubs.MessageSink;
-import com.launchdarkly.eventsource.Stubs.StubConnectionHandler;
-
-import org.junit.Rule;
 import org.junit.Test;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.Reader;
-import java.net.URI;
-import java.util.HashSet;
-import java.util.Set;
 
+import static com.launchdarkly.eventsource.TestUtils.makeStringOfLength;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.nullValue;
 
 @SuppressWarnings("javadoc")
-public class EventParserDataStreamingTest {
-  private static final URI ORIGIN = URI.create("http://host.com:99/foo");
-
-  @Rule public TestScopedLoggerRule testLogger = new TestScopedLoggerRule();
-  
+public class EventParserStreamingDataTest extends EventParserBaseTest {
   @Test
   public void singleLineDataInSingleChunk() throws Exception {
     String streamData = "data: line1\n\n";
-    MessageSink sink = new MessageSink();
-    startParser(streamData, 20, sink);
+    initParser(20, true);
+    processData(streamData);
 
-    MessageEvent e = sink.awaitEvent();
+    MessageEvent e = awaitMessageEvent();
     assertThat(e.isStreamingData(), is(true));
     assertThat(readFully(e.getDataReader()), equalTo("line1"));
+    
+    assertEof();
   }
 
   @Test
   public void singleLineDataInMultipleChunks() throws Exception {
     String streamData = "data: abcdefghijklmnopqrstuvwxyz\n\n";
-    MessageSink sink = new MessageSink();
-    startParser(streamData, 20, sink);
+    initParser(20, true);
+    processData(streamData);
     
-    MessageEvent e = sink.awaitEvent();
+    MessageEvent e = awaitMessageEvent();
     assertThat(e.isStreamingData(), is(true));
     assertThat(readFully(e.getDataReader()), equalTo("abcdefghijklmnopqrstuvwxyz"));
+    
+    assertEof();
   }
 
   @Test
   public void multiLineDataInSingleChunk() throws Exception {
     String streamData = "data: line1\ndata: line2\n\n";
-    MessageSink sink = new MessageSink();
-    startParser(streamData, 100, sink);
+    initParser(100, true);
+    processData(streamData);
 
-    MessageEvent e = sink.awaitEvent();
+    MessageEvent e = awaitMessageEvent();
     assertThat(e.isStreamingData(), is(true));
     assertThat(readFully(e.getDataReader()), equalTo("line1\nline2"));
+
+    assertEof();
   }
 
   @Test
   public void multiLineDataInMultipleChunks() throws Exception {
     String streamData = "data: abcdefghijklmnopqrstuvwxyz\ndata: 1234567890\n\n";
-    MessageSink sink = new MessageSink();
-    startParser(streamData, 20, sink);
+    initParser(20, true);
+    processData(streamData);
 
-    MessageEvent e = sink.awaitEvent();
+    MessageEvent e = awaitMessageEvent();
     assertThat(e.isStreamingData(), is(true));
     assertThat(readFully(e.getDataReader()), equalTo("abcdefghijklmnopqrstuvwxyz\n1234567890"));
-  }
 
+    assertEof();
+  }
+  
   @Test
   public void eventNameAndIdArePreservedIfTheyAreBeforeData() throws Exception {
     String streamData = "event: hello\nid: id1\ndata: line1\n\n";
-    MessageSink sink = new MessageSink();
-    startParser(streamData, 100, sink);
+    initParser(100, true);
+    processData(streamData);
 
-    MessageEvent e = sink.awaitEvent();
+    MessageEvent e = awaitMessageEvent();
     assertThat(e.isStreamingData(), is(true));
     assertThat(readFully(e.getDataReader()), equalTo("line1"));
     assertThat(e.getEventName(), equalTo("hello"));
     assertThat(e.getLastEventId(), equalTo("id1"));
 
-    sink.assertNoMoreEvents();
+    assertEof();
   }
 
   @Test
   public void eventNameAndIdAreIgnoredIfTheyAreAfterData() throws Exception {
     String streamData = "data: line1\nevent: hello\nid: id1\n\n";
-    MessageSink sink = new MessageSink();
-    startParser(streamData, 100, sink);
+    initParser(100, true);
+    processData(streamData);
 
-    MessageEvent e = sink.awaitEvent();
+    MessageEvent e = awaitMessageEvent();
     assertThat(e.isStreamingData(), is(true));
     assertThat(readFully(e.getDataReader()), equalTo("line1"));
     assertThat(e.getEventName(), equalTo(MessageEvent.DEFAULT_EVENT_NAME));
     assertThat(e.getLastEventId(), nullValue());
-  
-    sink.assertNoMoreEvents();
+    
+    assertEof();
   }
   
   @Test
   public void canRequireEventName() throws Exception {
     String streamData = "data: line1\nevent: hello\nid: id1\n\n" +
         "event: world\ndata: line2\nid: id2\n\n";
-    MessageSink sink = new MessageSink();
-    startParser(streamData, 100, sink, "event");
+    initParser(100, true, "event");
+    processData(streamData);
 
-    MessageEvent e1 = sink.awaitEvent();
+    MessageEvent e1 = awaitMessageEvent();
     assertThat(e1.isStreamingData(), is(false));
     assertThat(readFully(e1.getDataReader()), equalTo("line1"));
     assertThat(e1.getEventName(), equalTo("hello"));
     assertThat(e1.getLastEventId(), equalTo("id1"));
 
-    MessageEvent e2 = sink.awaitEvent();
+    MessageEvent e2 = awaitMessageEvent();
     assertThat(e2.isStreamingData(), is(true));
     assertThat(readFully(e2.getDataReader()), equalTo("line2"));
     assertThat(e2.getEventName(), equalTo("world"));
     assertThat(e2.getLastEventId(), equalTo("id1")); // "id: id2" was ignored because it came after "data:"
-  
-    sink.assertNoMoreEvents();
+
+    assertEof();
   }
 
   @Test
   public void canRequireEventId() throws Exception {
     String streamData = "data: line1\nevent: hello\nid: id1\n\n" +
         "id: id2\ndata: line2\nevent: world\n\n";
-    MessageSink sink = new MessageSink();
-    startParser(streamData, 100, sink, "id");
+    initParser(100, true, "id");
+    processData(streamData);
 
-    MessageEvent e1 = sink.awaitEvent();
+    MessageEvent e1 = awaitMessageEvent();
     assertThat(e1.isStreamingData(), is(false));
     assertThat(readFully(e1.getDataReader()), equalTo("line1"));
     assertThat(e1.getEventName(), equalTo("hello"));
     assertThat(e1.getLastEventId(), equalTo("id1"));
 
-    MessageEvent e2 = sink.awaitEvent();
+    MessageEvent e2 = awaitMessageEvent();
     assertThat(e2.isStreamingData(), is(true));
     assertThat(readFully(e2.getDataReader()), equalTo("line2"));
     assertThat(e2.getEventName(), equalTo(MessageEvent.DEFAULT_EVENT_NAME));
     assertThat(e2.getLastEventId(), equalTo("id2"));
-  
-    sink.assertNoMoreEvents();
+
+    assertEof();
   }
 
-  private void startParser(String streamData, int bufferSize, MessageSink sink, String... expectFieldNames) {
-    final Set<String> expectFields;
-    if (expectFieldNames != null && expectFieldNames.length != 0) {
-      expectFields = new HashSet<>();
-      for (String f: expectFieldNames) {
-        expectFields.add(f);
-      }
-    } else {
-      expectFields = null;
-    }
-    new Thread(() -> {
-      EventParser parser = new EventParser(
-          new ByteArrayInputStream(streamData.getBytes()),
-          ORIGIN,
-          sink,
-          new StubConnectionHandler(),
-          bufferSize,
-          true,
-          expectFields,
-          testLogger.getLogger()
-          );
-      while (!parser.isEof()) {
-        try {
-          parser.processStream();
-        } catch (IOException e) {}
-      }
-    }).run();
+  @Test
+  public void chunkSizeIsGreaterThanReaderBufferSize() throws Exception {
+    String s = makeStringOfLength(11000);
+    String streamData = "data: " + s + "\n\n";
+    initParser(10000, true);
+    processData(streamData);
+
+    MessageEvent e1 = awaitMessageEvent();
+    assertThat(e1.isStreamingData(), is(true));
+    assertThat(readFully(e1.getDataReader()), equalTo(s));
+  }
+
+  @Test
+  public void invalidLineWithinEvent() throws Exception {
+    initParser(20, true);
+    processData("data: data1\nignorethis: meaninglessline\ndata: data2\n\n");
+
+    MessageEvent e1 = awaitMessageEvent();
+    assertThat(e1.isStreamingData(), is(true));
+    assertThat(readFully(e1.getDataReader()), equalTo("data1\ndata2"));
+  }
+
+  @Test
+  public void incompletelyReadEventIsSkippedIfAnotherMessageIsRead() throws Exception {
+    String streamData = "data: hello1\ndata: hello2\nevent: hello\nid: id1\n\n" +
+        "data: world\n\n";
+    initParser(100, true);
+    processData(streamData);
+
+    MessageEvent e1 = awaitMessageEvent();
+    assertThat(e1.isStreamingData(), is(true));
+    assertThat(readUpToLimit(e1.getDataReader(), 2), equalTo("he"));
+
+    MessageEvent e2 = awaitMessageEvent();
+    assertThat(readFully(e2.getDataReader()), equalTo("world"));
+
+    assertEof();
+  }
+
+  @Test
+  public void streamIsClosedBeforeEndOfEvent() throws Exception {
+    String streamData = "data: hello\n";
+    initParser(100, true);
+    processData(streamData);
+
+    MessageEvent e1 = awaitMessageEvent();
+    assertThat(e1.isStreamingData(), is(true));
+    assertThat(readUpToLimit(e1.getDataReader(), 5), equalTo("hello"));
+
+    closeStream();
+    
+    assertThat(e1.getDataReader().read(), equalTo(-1));
+  }
+
+  @Test
+  public void redundantMessageCloseHasNoEffect() throws Exception {
+    String streamData = "data: hello\n\ndata: world\n\n";
+    initParser(100, true);
+    processData(streamData);
+
+    MessageEvent e1 = awaitMessageEvent();
+    assertThat(e1.isStreamingData(), is(true));
+    assertThat(readUpToLimit(e1.getDataReader(), 2), equalTo("he"));
+    e1.close();
+    e1.close();
+
+    MessageEvent e2 = awaitMessageEvent();
+    assertThat(e2.getData(), equalTo("world"));
+
+    assertEof();
+  }
+
+  private String readFully(Reader reader) {
+    return readUpToLimit(reader, 0);
   }
   
-  private String readFully(Reader reader) {
+  private String readUpToLimit(Reader reader, int limit) {
     char[] chunk = new char[1000];
     StringBuilder sb = new StringBuilder();
     while (true) {
       try {
-        int n = reader.read(chunk);
+        int n = reader.read(chunk, 0, limit > 0 ? (limit - sb.length()) : chunk.length);
         if (n < 0) {
-          return sb.toString();
+          break;
         }
         sb.append(new String(chunk, 0, n));
+        if (limit > 0 && sb.length() >= limit) {
+          break;
+        }
       } catch (IOException e) {
         throw new RuntimeException(e);
       }
     }
+    return sb.toString();
   }
 }

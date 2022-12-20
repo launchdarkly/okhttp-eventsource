@@ -1,9 +1,12 @@
-package com.launchdarkly.eventsource;
+package com.launchdarkly.eventsource.background;
+
+import com.launchdarkly.eventsource.MessageEvent;
+import com.launchdarkly.eventsource.StreamHttpErrorException;
 
 /**
- * Interface for an object that will receive SSE events.
+ * Interface for an object that will receive SSE events from {@link BackgroundEventSource}.
  */
-public interface EventHandler {
+public interface BackgroundEventHandler {
   /**
    * EventSource calls this method when the stream connection has been opened.
    * @throws Exception throwing an exception here will cause it to be logged and also sent to {@link #onError(Throwable)}
@@ -11,7 +14,7 @@ public interface EventHandler {
   void onOpen() throws Exception;
   
   /**
-   * EventSource calls this method when the stream connection has been closed.
+   * BackgroundEventSource calls this method when the stream connection has been closed.
    * <p>
    * This method is <i>not</i> called if the connection was closed due to a {@link ConnectionErrorHandler}
    * returning {@link ConnectionErrorHandler.Action#SHUTDOWN}; EventSource assumes that if you registered
@@ -41,7 +44,7 @@ public interface EventHandler {
   
   /**
    * This method will be called for all exceptions that occur on the socket connection (including
-   * an {@link UnsuccessfulResponseException} if the server returns an unexpected HTTP status),
+   * an {@link StreamHttpErrorException} if the server returns an unexpected HTTP status),
    * but only after the {@link ConnectionErrorHandler} (if any) has processed it.  If you need to
    * do anything that affects the state of the connection, use {@link ConnectionErrorHandler}.
    * <p>

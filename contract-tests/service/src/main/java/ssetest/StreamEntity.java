@@ -8,10 +8,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import okhttp3.*;
 import ssetest.Representations.*;
 
-public class StreamEntity implements EventHandler {
+public class StreamEntity {
   private final TestService owner;
   private final String id;
-  private final EventSource stream;
+  private final EventSource eventSource;
   private final StreamOptions options;
   private final AtomicInteger callbackMessageCounter = new AtomicInteger(0);
   private final LDLogger logger;
@@ -25,41 +25,46 @@ public class StreamEntity implements EventHandler {
     this.logger = LDLogger.withAdapter(logAdapter, options.tag);
     logger.info("Opening stream to {}", options.streamUrl);
 
-    EventSource.Builder eb = new EventSource.Builder(this, URI.create(options.streamUrl))
-      .logger(logger.subLogger("stream"));
-    if (options.headers != null) {
-      Headers.Builder hb = new Headers.Builder();
-      for (String name: options.headers.keySet()) {
-        hb.add(name, options.headers.get(name));
-      }
-      eb.headers(hb.build());
-    }
-    if (options.initialDelayMs != null) {
-      eb.reconnectTime(options.initialDelayMs, null);
-    }
+    HttpConnectStrategy connectStrategy = ConnectStrategy.http(URI.create(options.streamUrl));
     if (options.readTimeoutMs != null) {
-      eb.readTimeout(options.readTimeoutMs, null);
+      connectStrategy = connectStrategy.readTimeout((long)options.readTimeoutMs, null);
+    }
+    if (options.method != null) {
+      connectStrategy = connectStrategy.methodAndBody(options.method, 
+        options.body == null ? null :
+          RequestBody.create(options.body,
+            MediaType.parse(options.headers.get("content-type") == null ?
+              "text/plain; charset=utf-8" : options.headers.get("content-type")))
+      );
+    }
+    if (options.headers != null) {
+      for (String name: options.headers.keySet()) {
+        connectStrategy = connectStrategy.header(name, options.headers.get(name));
+      }
+    }
+
+    EventSource.Builder eb = new EventSource.Builder(connectStrategy)
+      .errorStrategy(ErrorStrategy.alwaysContinue())
+      .logger(logger.subLogger("stream"));
+    if (options.initialDelayMs != null) {
+      eb.retryDelay((long)options.initialDelayMs, null);
     }
     if (options.lastEventId != null) {
       eb.lastEventId(options.lastEventId);
     }
-    if (options.method != null) {
-      eb.method(options.method);
-    }
-    if (options.body != null) {
-      String contentType = options.headers == null ? null : options.headers.get("content-type");
-      eb.body(RequestBody.create(options.body,
-        MediaType.parse(contentType == null ? "text/plain; charset=utf-8" : contentType)));
-    }
-    this.stream = eb.build();
-    
-    this.stream.start();
+
+    this.eventSource = eb.build();
+    new Thread(() -> {
+      for (StreamEvent event: this.eventSource.anyEvents()) {
+        handleEvent(event);
+      }
+    }).start();
   }
   
   public boolean doCommand(String command) {
     logger.info("Test harness sent command: {}", command);
     if (command.equals("restart")) {
-      stream.restart();
+      eventSource.interrupt();
       return true;
     }
     return false;
@@ -67,32 +72,41 @@ public class StreamEntity implements EventHandler {
   
   public void close() {
     closed = true;
-    stream.close();
+    eventSource.close();
     owner.forgetStream(id);
     logger.info("Test ended");
   }
   
-  public void onOpen() {}
+  private void handleEvent(StreamEvent event) {
+    if (event instanceof MessageEvent) {
+      onMessage((MessageEvent)event);
+    } else if (event instanceof CommentEvent) {
+      onComment(((CommentEvent)event).getText());
+    } else if (event instanceof FaultEvent) {
+      onError(((FaultEvent)event).getCause());
+    }
+  }
   
-  public void onClosed() {}
-  
-  public void onMessage(String name, MessageEvent e) {
-    logger.info("Received event from stream ({})", name);
+  private void onMessage(MessageEvent e) {
+    logger.info("Received event from stream ({})", e.getEventName());
     Message m = new Message("event");
     m.event = new EventMessage();
-    m.event.type = name;
+    m.event.type = e.getEventName();
     m.event.data = e.getData();
     m.event.id = e.getLastEventId();
     writeMessage(m);
   }
   
-  public void onComment(String comment) {
+  private void onComment(String comment) {
     Message m = new Message("comment");
     m.comment = comment;
     writeMessage(m);
   }
   
-  public void onError(Throwable t) {
+  private void onError(Throwable t) {
+    if (t instanceof StreamClosedByCallerException) {
+      return; // the SSE contract tests don't want to see this non-error
+    }
     logger.info("Received error from stream: {}", t.toString());
     Message m = new Message("error");
     m.error = t.toString();

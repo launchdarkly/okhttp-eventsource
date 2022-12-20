@@ -69,7 +69,7 @@ dependencies {
     api("com.launchdarkly:launchdarkly-logging:${Versions.launchdarklyLogging}")
     api("com.squareup.okhttp3:okhttp:${Versions.okhttp}")
     testImplementation("org.mockito:mockito-core:1.10.19")
-    testImplementation("com.launchdarkly:test-helpers:1.0.0")
+    testImplementation("com.launchdarkly:test-helpers:2.0.1")
     testImplementation("com.google.guava:guava:30.1-jre")
     testImplementation("junit:junit:4.12")
     testImplementation("org.hamcrest:hamcrest-all:1.3")
@@ -122,15 +122,16 @@ tasks.jacocoTestCoverageVerification.configure {
     violationRules {
         val knownMissedLinesForMethods = mapOf(
             // The key for each of these items is the complete method signature minus the "com.launchdarkly.eventsource." prefix.
-            "AsyncEventHandler.acquire()" to 2,
-            "AsyncEventHandler.execute(java.lang.Runnable)" to 3,
+            "EventParser.IncrementalMessageDataInputStream.read()" to 7,
+            "EventParser.IncrementalMessageDataInputStream.read(byte[])" to 1,
+            "EventParser.IncrementalMessageDataInputStream.read(byte[], int, int)" to 2,
+            "EventParser.IncrementalMessageDataInputStream.canGetNextChunk()" to 3,
             "EventSource.awaitClosed(long, java.util.concurrent.TimeUnit)" to 2,
             "EventSource.awaitClosed(java.time.Duration)" to 1,
-            "EventSource.handleSuccessfulResponse(okhttp3.Response)" to 2,
-            "EventSource.maybeReconnectDelay(int, long)" to 2,
-            "EventSource.run()" to 3,
-            "EventSource.Builder.createInitialClientBuilder()" to 1,
-            "EventSource.Builder.defaultTrustManager()" to 2,
+            "Helpers.utf8ByteArrayOutputStreamToString(java.io.ByteArrayOutputStream)" to 2,
+            "HttpConnectStrategy.defaultTrustManager()" to 2,
+            "HttpConnectStrategy.Client.awaitClosed(long)" to 1,
+            "HttpConnectStrategy.Client.createHttpClient()" to 2,
             "MessageEvent.getData()" to 2,
             "ModernTLSSocketFactory.createSocket(java.lang.String, int)" to 1,
             "ModernTLSSocketFactory.createSocket(java.lang.String, int, java.net.InetAddress, int)" to 1,
@@ -138,8 +139,9 @@ tasks.jacocoTestCoverageVerification.configure {
             "ModernTLSSocketFactory.createSocket(java.net.InetAddress, int, java.net.InetAddress, int)" to 1,
             "ModernTLSSocketFactory.createSocket(java.net.Socket, java.lang.String, int, boolean)" to 1,
             "ModernTLSSocketFactory.getDefaultCipherSuites()" to 1,
-            "ModernTLSSocketFactory.getSupportedCipherSuites()" to 1
-        )
+            "ModernTLSSocketFactory.getSupportedCipherSuites()" to 1,
+            "background.BackgroundEventSource.dispatchEvent(com.launchdarkly.eventsource.StreamEvent)" to 3
+            )
         
         knownMissedLinesForMethods.forEach { (signature, maxMissedLines) ->
             if (maxMissedLines > 0) {  // < 0 means skip entire method

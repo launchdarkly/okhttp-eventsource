@@ -1,1 +1,1 @@
-packageSearchIndex = [{"l":"All Packages","url":"allpackages-index.html"},{"l":"com.launchdarkly.eventsource"}]
+packageSearchIndex = [{"l":"All Packages","url":"allpackages-index.html"},{"l":"com.launchdarkly.eventsource"},{"l":"com.launchdarkly.eventsource.background"}]

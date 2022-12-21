@@ -465,6 +465,11 @@ public class EventSource implements Closeable {
    * will start the stream again.
    * <p>
    * If the stream is not currently active, calling this method has no effect.
+   * <p>
+   * Note for Android developers: since it is generally undesirable to perform
+   * any network activity from the main thread, be aware that {@link #interrupt()},
+   * {@link #stop()}, and {@link #close()} all cause an immediate close of the
+   * connection (if any), which happens on the same thread that called the method.
    *
    * @since 4.0.0
    * @see #stop()
@@ -491,6 +496,11 @@ public class EventSource implements Closeable {
    * will start the stream again.
    * <p>
    * If the stream is not currently active, calling this method has no effect.
+   * <p>
+   * Note for Android developers: since it is generally undesirable to perform
+   * any network activity from the main thread, be aware that {@link #interrupt()},
+   * {@link #stop()}, and {@link #close()} all cause an immediate close of the
+   * connection (if any), which happens on the same thread that called the method.
    *
    * @since 4.0.0
    * @see #interrupt()
@@ -506,6 +516,11 @@ public class EventSource implements Closeable {
    * This is similar to {@link #stop()} except that it also releases any resources that
    * the EventSource was maintaining in general, such as an HTTP connection pool. Do
    * not try to use the EventSource after closing it.
+   * <p>
+   * Note for Android developers: since it is generally undesirable to perform
+   * any network activity from the main thread, be aware that {@link #interrupt()},
+   * {@link #stop()}, and {@link #close()} all cause an immediate close of the
+   * connection (if any), which happens on the same thread that called the method.
    */
   @Override
   public void close() {

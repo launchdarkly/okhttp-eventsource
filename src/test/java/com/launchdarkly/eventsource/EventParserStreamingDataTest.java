@@ -1,5 +1,6 @@
 package com.launchdarkly.eventsource;
 
+import org.junit.Assert;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -10,6 +11,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.Assert.fail;
 
 @SuppressWarnings("javadoc")
 public class EventParserStreamingDataTest extends EventParserBaseTest {
@@ -179,7 +181,22 @@ public class EventParserStreamingDataTest extends EventParserBaseTest {
   }
 
   @Test
-  public void streamIsClosedBeforeEndOfEvent() throws Exception {
+  public void streamIsClosedImmediatelyAfterEndOfEvent() throws Exception {
+    String streamData = "data: hello\n\n";
+    initParser(100, true);
+    processData(streamData);
+
+    MessageEvent e1 = awaitMessageEvent();
+    assertThat(e1.isStreamingData(), is(true));
+    assertThat(readUpToLimit(e1.getDataReader(), 5), equalTo("hello"));
+
+    closeStream();
+    
+    assertThat(e1.getDataReader().read(), equalTo(-1)); // normal EOF, not an error
+  }
+
+  @Test
+  public void streamIsClosedBeforeEndOfEventAtEndOfLine() throws Exception {
     String streamData = "data: hello\n";
     initParser(100, true);
     processData(streamData);
@@ -190,7 +207,28 @@ public class EventParserStreamingDataTest extends EventParserBaseTest {
 
     closeStream();
     
-    assertThat(e1.getDataReader().read(), equalTo(-1));
+    try {
+      e1.getDataReader().read();
+      fail("expected exception");
+    } catch (StreamClosedWithIncompleteMessageException e) {}
+  }
+
+  @Test
+  public void streamIsClosedBeforeEndOfEventWithinLine() throws Exception {
+    String streamData = "data: hello";
+    initParser(100, true);
+    processData(streamData);
+
+    MessageEvent e1 = awaitMessageEvent();
+    assertThat(e1.isStreamingData(), is(true));
+    assertThat(readUpToLimit(e1.getDataReader(), 5), equalTo("hello"));
+
+    closeStream();
+    
+    try {
+      e1.getDataReader().read();
+      fail("expected exception");
+    } catch (StreamClosedWithIncompleteMessageException e) {}
   }
 
   @Test

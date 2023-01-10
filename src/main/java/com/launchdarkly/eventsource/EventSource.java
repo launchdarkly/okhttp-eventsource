@@ -962,9 +962,10 @@ public class EventSource implements Closeable {
      * If you set it to {@code true}, it will instead call the handler as soon as it sees a {@code data} field--
      * setting {@link MessageEvent#getDataReader()} to a {@link java.io.Reader} that reads directly from the data as
      * it arrives. The EventSource will perform any necessary parsing under the covers, so that for instance if there
-     * are multiple {@code data:} lines in the event, the {@link java.io.Reader} will emit a newline character between
-     * each and will not see the "data:" field names. The {@link java.io.Reader} will report "end of stream" as soon
-     * as the event is terminated normally by a blank line.
+     * are multiple {@code data:} lines in the event, the Reader will emit a newline character between
+     * each and will not see the "data:" field names. The Reader will report "end of stream" as soon
+     * as the event is terminated normally by a blank line. If the stream is closed before normal termination of
+     * the event, the Reader will throw a {@link StreamClosedWithIncompleteMessageException}.
      * <p>
      * This mode is designed for applications that expect very large data items to be delivered over SSE. Use it
      * with caution, since there are several limitations:
@@ -978,7 +979,8 @@ public class EventSource implements Closeable {
      * <li> The SSE protocol specifies that an event should be processed only if it is terminated by a blank line, but
      * in this mode the handler will receive the event as soon as a {@code data:} field appears-- so, if the stream
      * happens to cut off abnormally without a trailing blank line, technically you will be receiving an incomplete
-     * event that should have been ignored. </li>
+     * event that should have been ignored. You will know this has happened ifbecause reading from the Reader throws
+     * a {@link StreamClosedWithIncompleteMessageException}.</li>
      * </ul>  
      * 
      * @param streamEventData true if events should be dispatched immediately with asynchronous data rather than

@@ -2,6 +2,9 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [4.1.0] - 2023-01-09
+This release is identical to [4.0.1](https://github.com/launchdarkly/okhttp-eventsource/releases/tag/4.0.1). It exists for Semantic Versioning compliance: a new API was added (the `StreamClosedWithIncompleteMessageException` class) since 4.0.0, therefore the next version number should have been 4.1.0 rather than 4.0.1.
+
 ## [4.0.1] - 2023-01-09
 ### Added:
 - `StreamClosedWithIncompleteMessageException` (see below).

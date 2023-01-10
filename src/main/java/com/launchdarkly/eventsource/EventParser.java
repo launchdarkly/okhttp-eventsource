@@ -424,7 +424,10 @@ final class EventParser {
         // (B) We must ask lineParser to give us another chunk of a not-yet-finished line.
         if (!lineEnded) {
           if (!canGetNextChunk()) {
-            return -1; // EOF
+            // The underlying SSE stream has run out of data while we were still trying to
+            // read the rest of the message. This is an abnormal condition, so we'll treat
+            // it as an exception, rather than just returning -1 to indicate EOF.
+            throw new StreamClosedWithIncompleteMessageException();
           }
           haveChunk = true;
           continue; // We'll go to (A) in the next loop
@@ -433,10 +436,15 @@ final class EventParser {
         // (C) The previous line was done; ask lineParser to give us the next line (or at
         // least the first chunk of it).
         if (!canGetNextChunk()) {
-          return -1; // EOF
+          // See comment above about abnormal termination. Even if we just finished
+          // reading a complete line of data, the message is incomplete because we didn't
+          // see a blank line.
+          throw new StreamClosedWithIncompleteMessageException();
         }
         if (lineEnded && chunkSize == 0) {
-          // Blank line means end of message - close this stream and return EOF.
+          // Blank line means end of message - close this stream and return EOF. This is a
+          // normal condition: the stream of data for this message is done because the
+          // message is finished.
           closed.set(true);
           resetState();
           return -1;

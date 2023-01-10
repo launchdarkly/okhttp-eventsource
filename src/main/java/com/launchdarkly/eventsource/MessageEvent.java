@@ -195,7 +195,13 @@ public class MessageEvent implements StreamEvent {
    * <p>
    * The method will never return {@code null}; every event has data, even if the data is empty
    * (zero length).
-   *  
+   * <p>
+   * If the stream connection is closed before a complete SSE message has been received (that is,
+   * before the usual blank line that would terminate a message), then instead of a normal EOF,
+   * the Reader will throw a {@link StreamClosedWithIncompleteMessageException}. If this happens,
+   * the application should generally discard the entire {@link MessageEvent} and not try to
+   * process it further. 
+   *
    * @return a reader for the event data
    * @since 2.6.0
    */

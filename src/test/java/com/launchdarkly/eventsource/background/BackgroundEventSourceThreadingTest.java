@@ -16,6 +16,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 import static com.launchdarkly.eventsource.MockConnectStrategy.respondWithDataAndThenStayOpen;
 import static com.launchdarkly.eventsource.MockConnectStrategy.respondWithStream;
@@ -57,11 +58,11 @@ public class BackgroundEventSourceThreadingTest {
       
       assertThat(testHandler.awaitLogItem(), equalTo(LogItem.opened()));
       
-      assertThat(awaitValue(calledStreamExecutorFromThread, 1, null),
+      assertThat(awaitValue(calledStreamExecutorFromThread, 1, TimeUnit.SECONDS),
           sameInstance(Thread.currentThread()));
       assertNoMoreValues(calledStreamExecutorFromThread, 100, null);
       
-      assertThat(awaitValue(calledEventsExecutorFromThread, 1, null),
+      assertThat(awaitValue(calledEventsExecutorFromThread, 1, TimeUnit.SECONDS),
           not(sameInstance(Thread.currentThread())));
       assertNoMoreValues(calledEventsExecutorFromThread, 100, null);
     }
@@ -81,7 +82,7 @@ public class BackgroundEventSourceThreadingTest {
         .build()) {
       bes.start();
 
-      assertThat(awaitValue(calledStreamExecutorFromThread, 1, null),
+      assertThat(awaitValue(calledStreamExecutorFromThread, 1, TimeUnit.SECONDS),
           sameInstance(Thread.currentThread()));
       assertNoMoreValues(calledStreamExecutorFromThread, 100, null);
 
@@ -102,7 +103,7 @@ public class BackgroundEventSourceThreadingTest {
         ).build()) {
       bes.start();
       
-      Thread handlerThread = awaitValue(capturedThreads, 1, null);
+      Thread handlerThread = awaitValue(capturedThreads, 1, TimeUnit.SECONDS);
       
       assertThat(handlerThread.getPriority(), not(equalTo(Thread.MAX_PRIORITY)));
     }
@@ -120,7 +121,7 @@ public class BackgroundEventSourceThreadingTest {
         .threadPriority(Thread.MAX_PRIORITY).build()) {
       bes.start();
       
-      Thread handlerThread = awaitValue(capturedThreads, 1, null);
+      Thread handlerThread = awaitValue(capturedThreads, 1, TimeUnit.SECONDS);
       
       assertThat(handlerThread.getPriority(), equalTo(Thread.MAX_PRIORITY));
     }

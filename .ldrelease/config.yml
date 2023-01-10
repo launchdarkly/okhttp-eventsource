@@ -6,7 +6,7 @@ repo:
 
 jobs:
   - docker:
-      image: gradle:6.8.3-jdk11
+      image: gradle:7.6-jdk11
     template:
       name: gradle
 

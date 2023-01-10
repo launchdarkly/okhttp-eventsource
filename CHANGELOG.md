@@ -2,6 +2,13 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [4.0.1] - 2023-01-09
+### Added:
+- `StreamClosedWithIncompleteMessageException` (see below).
+
+### Fixed:
+- When using streaming data mode (see `EventSource.Builder.streamEventData`), if the stream connection was lost before the `MessageEvent` was fully read-- that is, before encountering a blank line-- the `Reader` returned by `MessageEvent.getDataReader()` was treating this as a regular EOF condition. That was incorrect; the SSE specification says that in such a case, the incomplete message is invalid and its contents should not be used. Therefore, in this case reading from the `Reader` will throw a `StreamClosedWithIncompleteMessageException`. The caller should handle this by simply throwing away the `MessageEvent`.
+
 ## [4.0.0] - 2022-12-19
 This release revises the implementation of `EventSource` so that it does not create its own worker threads. The methods for starting and reading a stream now perform synchronous I/O, and the caller is responsible for choosing what thread to start the stream and read the stream on. This makes the core implementation simpler and more efficient, and reduces possibilities for deadlock. If you want to continue using the old asynchronous push model, see the `com.launchdarkly.eventsource.background` package.
 

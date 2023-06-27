@@ -70,7 +70,7 @@ dependencies {
     api("com.squareup.okhttp3:okhttp:${Versions.okhttp}")
     testImplementation("org.mockito:mockito-core:1.10.19")
     testImplementation("com.launchdarkly:test-helpers:2.0.1")
-    testImplementation("com.google.guava:guava:30.1-jre")
+    testImplementation("com.google.guava:guava:32.0.1-jre")
     testImplementation("junit:junit:4.12")
     testImplementation("org.hamcrest:hamcrest-all:1.3")
 }

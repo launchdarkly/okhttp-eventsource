@@ -1,14 +1,13 @@
 package com.launchdarkly.eventsource;
 
 import com.launchdarkly.logging.LDLogger;
+import okhttp3.HttpUrl;
 
 import java.io.Closeable;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
-
-import okhttp3.HttpUrl;
 
 /**
  * An abstraction of how {@link EventSource} should obtain an input stream.
@@ -64,21 +63,39 @@ public abstract class ConnectStrategy {
     public static class Result {
       private final InputStream inputStream;
       private final URI origin;
-      private final Closeable closer;
-      
+      private final Closeable connectionCloser;
+      private final Closeable responseCloser;
+
       /**
        * Creates an instance.
        * 
        * @param inputStream see {@link #getInputStream()}
        * @param origin see {@link #getOrigin()}
-       * @param closer see {@link #getCloser()}
+       * @param connectionCloser see {@link #getConnectionCloser()}
        */
-      public Result(InputStream inputStream, URI origin, Closeable closer) {
+      public Result(InputStream inputStream, URI origin, Closeable connectionCloser) {
         this.inputStream = inputStream;
         this.origin = origin;
-        this.closer = closer;
+        this.connectionCloser = connectionCloser;
+        this.responseCloser = null;
       }
-      
+
+      /**
+       * Creates an instance.
+       *
+       * @param inputStream see {@link #getInputStream()}
+       * @param origin see {@link #getOrigin()}
+       * @param connectionCloser see {@link #getConnectionCloser()}
+       * @param responseCloser see {@link #getResponseCloser()}
+       */
+      public Result(InputStream inputStream, URI origin, Closeable connectionCloser, Closeable responseCloser) {
+        this.inputStream = inputStream;
+        this.origin = origin;
+        this.connectionCloser = connectionCloser;
+        this.responseCloser = responseCloser;
+      }
+
+
       /**
        * The input stream that {@link EventSource} should read from.
        *
@@ -115,8 +132,20 @@ public abstract class ConnectStrategy {
        *
        * @return a Closeable object or null
        */
-      public Closeable getCloser() {
-        return closer;
+      public Closeable getConnectionCloser() {
+        return connectionCloser;
+      }
+
+      /**
+       * An object that {@link EventSource} can use to close the streaming response.
+       * If this is not null, its {@link Closeable#close()} method will be
+       * called whenever the current streaming response is stopped either due to an
+       * error or because the caller explicitly closed the stream.
+       *
+       * @return a Closeable object or null
+       */
+      public Closeable getResponseCloser() {
+        return responseCloser;
       }
     }
     

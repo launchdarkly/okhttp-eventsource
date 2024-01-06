@@ -32,7 +32,7 @@ import okhttp3.HttpUrl;
  * The client uses a pull model where the caller starts the EventSource and then requests
  * data from it synchronously on a single thread. The initial connection attempt is made
  * when you call {@link #start()}, or when you first attempt to read an event.
- * 
+ *
  * To read events from the stream, you can either request them one at a time by calling
  * {@link #readMessage()} or {@link #readAnyEvent()}, or consume them in a loop by calling
  * {@link #messages()} or {@link #anyEvents()}. The "message" methods assume you are only
@@ -70,11 +70,11 @@ public class EventSource implements Closeable {
    * The default value for {@link Builder#readBufferSize(int)}.
    */
   public static final int DEFAULT_READ_BUFFER_SIZE = 1000;
-  
+
   // Note that some fields have package-private visibility for tests.
-  
+
   private final Object sleepNotifier = new Object();
-  
+
   // The following final fields are set from the configuration builder.
   private final ConnectStrategy.Client client;
   final int readBufferSize;
@@ -83,7 +83,7 @@ public class EventSource implements Closeable {
   final long retryDelayResetThresholdMillis;
   final boolean streamEventData;
   final Set<String> expectFields;
-  
+
   // The following mutable fields are not volatile because they should only be
   // accessed from the thread that is reading from EventSource.
   private EventParser eventParser;
@@ -97,6 +97,7 @@ public class EventSource implements Closeable {
   // be modified from other threads if they call stop() or interrupt(). We
   // use AtomicReference because we need atomicity in updates.
   private final AtomicReference<Closeable> connectionCloser = new AtomicReference<>();
+  private final AtomicReference<Closeable> responseCloser = new AtomicReference<>();
   private final AtomicReference<Thread> readingThread = new AtomicReference<>();
   private final AtomicReference<ReadyState> readyState;
 
@@ -104,7 +105,7 @@ public class EventSource implements Closeable {
   // and are read by the thread that is reading the stream.
   private volatile boolean deliberatelyClosedConnection;
   private volatile boolean calledStop;
-  
+
   // These fields are written by the thread that is reading the stream, and can
   // be read by other threads to inspect the state of the stream.
   volatile long baseRetryDelayMillis; // set at config time but may be changed by a "retry:" value
@@ -139,7 +140,7 @@ public class EventSource implements Closeable {
   public URI getOrigin() {
     return origin;
   }
-  
+
   /**
    * Returns the logger that this EventSource is using.
    *
@@ -166,7 +167,7 @@ public class EventSource implements Closeable {
    * This can be set initially with {@link Builder#lastEventId(String)}, and is updated whenever an event
    * is received that has an ID. Whether event IDs are supported depends on the server; it may ignore this
    * value.
-   * 
+   *
    * @return the last known event ID, or null
    * @see Builder#lastEventId(String)
    * @since 2.0.0
@@ -192,7 +193,7 @@ public class EventSource implements Closeable {
   public long getBaseRetryDelayMillis() {
     return baseRetryDelayMillis;
   }
-  
+
   /**
    * Returns the retry delay that will be used for the next reconnection, if the
    * stream has failed.
@@ -212,7 +213,7 @@ public class EventSource implements Closeable {
   public long getNextRetryDelayMillis() {
     return nextReconnectDelayMillis;
   }
-  
+
   /**
    * Attempts to start the stream if it is not already active.
    * <p>
@@ -244,7 +245,7 @@ public class EventSource implements Closeable {
   public void start() throws StreamException {
     tryStart(false);
   }
-  
+
   private FaultEvent tryStart(boolean canReturnFaultEvent) throws StreamException {
     if (eventParser != null) {
       return null;
@@ -253,7 +254,7 @@ public class EventSource implements Closeable {
 
     while (true) {
       StreamException exception = null;
-      
+
       if (nextReconnectDelayMillis > 0) {
         long delayNow = disconnectedTime == 0 ? nextReconnectDelayMillis :
           (nextReconnectDelayMillis - (System.currentTimeMillis() - disconnectedTime));
@@ -279,22 +280,22 @@ public class EventSource implements Closeable {
           }
         }
       }
-      
+
       ConnectStrategy.Client.Result clientResult = null;
-      
+
       if (exception == null) {
         readyState.set(ReadyState.CONNECTING);
-        
+
         connectedTime = 0;
         deliberatelyClosedConnection = calledStop = false;
-        
+
         try {
           clientResult = client.connect(lastEventId);
         } catch (StreamException e) {
           exception = e;
         }
       }
-      
+
       if (exception != null) {
         disconnectedTime = System.currentTimeMillis();
         computeReconnectDelay();
@@ -308,16 +309,18 @@ public class EventSource implements Closeable {
           // transparently.
           continue;
         }
-        // The ErrorStrategy told us to THROW rather than CONTINUE. 
+        // The ErrorStrategy told us to THROW rather than CONTINUE.
         throw exception;
       }
-      
-      
-      connectionCloser.set(clientResult.getCloser());
+
+
+      connectionCloser.set(clientResult.getConnectionCloser());
+      responseCloser.set(clientResult.getResponseCloser());
+
       origin = clientResult.getOrigin() == null ? client.getOrigin() : clientResult.getOrigin();
       connectedTime = System.currentTimeMillis();
       logger.debug("Connected to SSE stream");
-      
+
       eventParser = new EventParser(
           clientResult.getInputStream(),
           clientResult.getOrigin(),
@@ -326,14 +329,14 @@ public class EventSource implements Closeable {
           expectFields,
           logger
           );
-      
+
       readyState.set(ReadyState.OPEN);
 
       currentErrorStrategy = baseErrorStrategy;
       return null;
     }
   }
-  
+
   /**
    * Attempts to receive a message from the stream.
    * <p>
@@ -347,7 +350,7 @@ public class EventSource implements Closeable {
    * <p>
    * This method must be called from the same thread that first started using the
    * stream (that is, the thread that called {@link #start()} or read the first event).
-   * 
+   *
    * @return an SSE message
    * @throws StreamException if there is an error and retry is not enabled
    * @see #readAnyEvent()
@@ -362,7 +365,7 @@ public class EventSource implements Closeable {
       }
     }
   }
-  
+
   /**
    * Attempts to receive an event of any kind from the stream.
    * <p>
@@ -417,7 +420,7 @@ public class EventSource implements Closeable {
       }
     };
   }
-  
+
   /**
    * Returns an iterable sequence of events.
    * <p>
@@ -528,7 +531,7 @@ public class EventSource implements Closeable {
     if (currentState == SHUTDOWN) {
       return;
     }
-    
+
     closeCurrentStream(true, true);
     try {
       client.close();
@@ -552,12 +555,12 @@ public class EventSource implements Closeable {
   // Iterator implementation used by messages() and anyEvents()
   private class IteratorImpl<T extends StreamEvent> implements Iterator<T> {
     private final Class<T> filterClass;
-    
+
     IteratorImpl(Class<T> filterClass) {
       this.filterClass = filterClass;
       calledStop = false;
     }
-    
+
     public boolean hasNext() {
       while (true) {
         if (nextEvent != null && filterClass.isAssignableFrom(nextEvent.getClass())) {
@@ -574,7 +577,7 @@ public class EventSource implements Closeable {
         }
       }
     }
-    
+
     public T next() {
       while (nextEvent == null || !filterClass.isAssignableFrom(nextEvent.getClass()) && hasNext()) {}
       @SuppressWarnings("unchecked")
@@ -586,7 +589,7 @@ public class EventSource implements Closeable {
 
   private StreamEvent requireEvent() throws StreamException {
     readingThread.set(Thread.currentThread());
-    
+
     try {
       while (true) {
         // Reading an event implies starting the stream if it isn't already started.
@@ -629,7 +632,7 @@ public class EventSource implements Closeable {
       throw e;
     }
   }
-  
+
   private void resetRetryDelayStrategy() {
     logger.debug("Resetting retry delay strategy to initial state");
     currentRetryDelayStrategy = baseRetryDelayStrategy;
@@ -642,7 +645,7 @@ public class EventSource implements Closeable {
     }
     return errorStrategyResult.getAction();
   }
-  
+
   private void computeReconnectDelay() {
     if (retryDelayResetThresholdMillis > 0 && connectedTime != 0) {
       long connectionDurationMillis = System.currentTimeMillis() - connectedTime;
@@ -660,11 +663,12 @@ public class EventSource implements Closeable {
 
   private boolean closeCurrentStream(boolean deliberatelyInterrupted, boolean shouldStopIterating) {
     Closeable oldConnectionCloser = this.connectionCloser.getAndSet(null);
+
     Thread oldReadingThread = readingThread.getAndSet(null);
     if (oldConnectionCloser == null && oldReadingThread == null) {
       return false;
     }
-    
+
     synchronized (sleepNotifier) { // this synchronization prevents a race condition in start()
       if (deliberatelyInterrupted) {
         this.deliberatelyClosedConnection = true;
@@ -681,18 +685,31 @@ public class EventSource implements Closeable {
         }
       }
       if (oldReadingThread == Thread.currentThread()) {
+        Closeable oldResponseCloser = this.responseCloser.getAndSet(null);
         eventParser = null;
+        // Response can only be closed from reading thread. Otherwise, it will cause
+        // java.lang.IllegalStateException: Unbalanced enter/exit raised from okhttp
+        // since closing response will drain remaining chunks if exists, resulting in concurrent buffer source reading.
+        // which may conflict with reading thread.
+        if (oldResponseCloser != null) {
+          try {
+            oldResponseCloser.close();
+            logger.debug("Closed response");
+          } catch (IOException e) {
+            logger.warn("Unexpected error when closing response: {}", LogValues.exceptionSummary(e));
+          }
+        }
         readyState.compareAndSet(ReadyState.OPEN, ReadyState.CLOSED);
         readyState.compareAndSet(ReadyState.CONNECTING, ReadyState.CLOSED);
         // If the current thread is not the reading thread, these fields will be updated the
         // next time the reading thread tries to do a read.
       }
-      
+
       sleepNotifier.notify(); // in case we're sleeping in a reconnect delay, wake us up
     }
     return true;
   }
-  
+
   /**
    * Builder for configuring {@link EventSource}.
    */
@@ -725,7 +742,7 @@ public class EventSource implements Closeable {
      * <p>
      * Or, if you want to consume an input stream from some other source, you can
      * create your own subclass of {@link ConnectStrategy}.
-     * 
+     *
      * @param connectStrategy the object that will manage the input stream;
      *   must not be null
      * @since 4.0.0
@@ -779,11 +796,11 @@ public class EventSource implements Closeable {
      * <p>
      * This is the same as {@link #Builder(URI)}, but using the OkHttp type
      * {@link HttpUrl}.
-     * 
+     *
      * @param url the stream URL
      * @throws IllegalArgumentException if the argument is null, or if the endpoint
      *   is not HTTP or HTTPS
-     * 
+     *
      * @since 1.9.0
      * @see #Builder(ConnectStrategy)
      * @see #Builder(URI)
@@ -792,7 +809,7 @@ public class EventSource implements Closeable {
     public Builder(HttpUrl url) {
       this(ConnectStrategy.http(url));
     }
-    
+
     /**
      * Specifies a strategy for determining whether to handle errors transparently
      * or throw them as exceptions.
@@ -802,7 +819,7 @@ public class EventSource implements Closeable {
      * may instead use alternate {@link ErrorStrategy} implementations, such as
      * {@link ErrorStrategy#alwaysContinue()}, or a custom implementation, to allow
      * EventSource to continue after an error.
-     *  
+     *
      * @param errorStrategy the object that will control error handling; if null,
      *   defaults to {@link ErrorStrategy#alwaysThrow()}
      * @return the builder
@@ -812,7 +829,7 @@ public class EventSource implements Closeable {
       this.errorStrategy = errorStrategy;
       return this;
     }
-    
+
     /**
      * Sets the ID value of the last event received.
      * <p>
@@ -820,7 +837,7 @@ public class EventSource implements Closeable {
      * skip past previously sent events if it supports this behavior. Once the connection is established,
      * this value will be updated whenever an event is received that has an ID. Whether event IDs are
      * supported depends on the server; it may ignore this value.
-     * 
+     *
      * @param lastEventId the last event identifier
      * @return the builder
      * @since 2.0.0
@@ -841,7 +858,7 @@ public class EventSource implements Closeable {
      * If you set the base delay to zero, the backoff logic will not apply-- multiplying by
      * zero gives zero every time. Therefore, use a zero delay with caution since it could
      * cause a reconnect storm during a service interruption.
-     * 
+     *
      * @param retryDelay the base delay, in whatever time unit is specified by {@code timeUnit}
      * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
      * @return the builder
@@ -864,7 +881,7 @@ public class EventSource implements Closeable {
      * is to apply an exponential backoff and jitter. You may instead use a modified
      * version of {@link DefaultRetryDelayStrategy} to customize the backoff and
      * jitter, or a custom implementation with any other logic.
-     *  
+     *
      * @param retryDelayStrategy the object that will control retry delays; if null,
      *   defaults to {@link RetryDelayStrategy#defaultStrategy()}
      * @return the builder
@@ -886,7 +903,7 @@ public class EventSource implements Closeable {
      * connection lasted longer than the threshold, in which case the delay will start over at the
      * initial minimum value. This prevents long delays from occurring on connections that are only
      * rarely restarted.
-     *   
+     *
      * @param retryDelayResetThreshold the minimum time that a connection must stay open to avoid resetting
      *   the delay, in whatever time unit is specified by {@code timeUnit}
      * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
@@ -909,7 +926,7 @@ public class EventSource implements Closeable {
      * Therefore, if an application expects to see many lines in the stream that are longer
      * than {@link EventSource#DEFAULT_READ_BUFFER_SIZE}, it can specify a larger buffer size
      * to avoid unnecessary heap allocations.
-     * 
+     *
      * @param readBufferSize the buffer size
      * @return the builder
      * @throws IllegalArgumentException if the size is less than or equal to zero
@@ -923,7 +940,7 @@ public class EventSource implements Closeable {
       this.readBufferSize = readBufferSize;
       return this;
     }
-    
+
     /**
      * Specifies a custom logger to receive EventSource logging.
      * <p>
@@ -934,14 +951,14 @@ public class EventSource implements Closeable {
      * the basic console logging implementation, and to tag the output with the name "logname":
      * <pre><code>
      *   // import com.launchdarkly.logging.*;
-     *   
+     *
      *   builder.logger(
-     *      LDLogger.withAdapter(Logs.basic(), "logname") 
+     *      LDLogger.withAdapter(Logs.basic(), "logname")
      *   );
      * </code></pre>
      * <p>
      * If you do not provide a logger, the default is there is no log output.
-     * 
+     *
      * @param logger an {@link LDLogger} implementation, or null for no logging
      * @return the builder
      * @since 2.7.0
@@ -975,16 +992,16 @@ public class EventSource implements Closeable {
      * first and {@code event:} second, {@link MessageEvent#getEventName()} will <i>not</i> contain the value of
      * {@code event:} but will be {@link MessageEvent#DEFAULT_EVENT_NAME} instead; similarly, an {@code id:} field will
      * be ignored if it appears after {@code data:} in this mode. Therefore, you should only use this mode if the
-     * server's behavior is predictable in this regard.</li>  
+     * server's behavior is predictable in this regard.</li>
      * <li> The SSE protocol specifies that an event should be processed only if it is terminated by a blank line, but
      * in this mode the handler will receive the event as soon as a {@code data:} field appears-- so, if the stream
      * happens to cut off abnormally without a trailing blank line, technically you will be receiving an incomplete
      * event that should have been ignored. You will know this has happened ifbecause reading from the Reader throws
      * a {@link StreamClosedWithIncompleteMessageException}.</li>
-     * </ul>  
-     * 
+     * </ul>
+     *
      * @param streamEventData true if events should be dispatched immediately with asynchronous data rather than
-     *   read fully before dispatch 
+     *   read fully before dispatch
      * @return the builder
      * @see #expectFields(String...)
      * @since 2.6.0
@@ -1017,7 +1034,7 @@ public class EventSource implements Closeable {
      * <p>
      * Such behavior is not automatic because in some applications, there might never be an {@code event:} field,
      * and EventSource has no way to anticipate this.
-     * 
+     *
      * @param fieldNames a list of SSE field names (case-sensitive; any names other than "event" and "id" are ignored)
      * @return the builder
      * @see #streamEventData(boolean)
@@ -1036,7 +1053,7 @@ public class EventSource implements Closeable {
       }
       return this;
     }
-    
+
     /**
      * Constructs an {@link EventSource} using the builder's current properties.
      * @return the new EventSource instance

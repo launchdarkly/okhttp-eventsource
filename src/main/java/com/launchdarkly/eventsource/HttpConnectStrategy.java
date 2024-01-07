@@ -466,10 +466,10 @@ public class HttpConnectStrategy extends ConnectStrategy {
           responseBody.byteStream(),
           uri,
           new RequestCloser(call),
-        // prevent from connection leak warning from okhttp.
-        // see: okhttp3.internal.connection.RealConnectionPool.pruneAndGetAllocationCount
-        new ResponseCloser(response)
-          );
+          // prevent from connection leak warning from okhttp.
+          // see: okhttp3.internal.connection.RealConnectionPool.pruneAndGetAllocationCount
+          new ResponseCloser(response)
+      );
     }
     
     public void close() {

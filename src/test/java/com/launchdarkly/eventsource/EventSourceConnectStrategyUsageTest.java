@@ -346,6 +346,41 @@ public class EventSourceConnectStrategyUsageTest {
   }
 
   @Test
+  public void exceptionFromCloserDoesNotPreventClosingResponse() throws Exception {
+    Semaphore calledClose = new Semaphore(0);
+    ConnectStrategy cs = new ConnectStrategy() {
+      @Override
+      public Client createClient(LDLogger logger) {
+        return new ClientBaseImpl() {
+          @Override
+          public Result connect(String lastEventId) throws StreamException {
+            return new Result(makeEmptyInputStream(), null, new Closeable() {
+              @Override
+              public void close() throws IOException {
+
+              }
+            }, new Closeable() {
+              @Override
+              public void close() throws IOException {
+                calledClose.release();
+                throw new IOException("fake error");
+              }
+            });
+          }
+        };
+      }
+    };
+
+    try (EventSource es = new EventSource.Builder(cs).build()) {
+      es.start();
+
+      assertThat(calledClose.tryAcquire(1, TimeUnit.MILLISECONDS), is(false));
+    }
+    assertThat(calledClose.tryAcquire(1, TimeUnit.MILLISECONDS), is(true));
+  }
+
+
+  @Test
   public void exceptionFromCloserDoesNotPreventClosingStream() throws Exception {
     Semaphore calledClose = new Semaphore(0);
     ConnectStrategy cs = new ConnectStrategy() {

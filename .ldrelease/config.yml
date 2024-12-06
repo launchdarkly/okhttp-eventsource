@@ -1,9 +1,5 @@
 version: 2
 
-repo:
-  public: okhttp-eventsource
-  private: okhttp-eventsource-private
-
 jobs:
   - docker:
       image: gradle:7.6-jdk11

@@ -13,21 +13,24 @@ public class TestUtils {
     return sb.toString();
   }
 
-  public static void interruptOnAnotherThreadAfterDelay(EventSource es, long delayMillis) {
-    new Thread(new Runnable() {
+  public static Thread interruptOnAnotherThreadAfterDelay(EventSource es, long delayMillis) {
+    Thread t = new Thread(new Runnable() {
       public void run() {
         try {
           if (delayMillis > 0) {
             Thread.sleep(delayMillis);
           }
-        } catch (InterruptedException e) {}
+        } catch (InterruptedException e) {
+        }
         es.interrupt();
       }
-    }).start();
+    });
+    t.start();
+    return t;
   }
   
-  public static void interruptOnAnotherThread(EventSource es) {
-    interruptOnAnotherThreadAfterDelay(es, 0);
+  public static Thread interruptOnAnotherThread(EventSource es) {
+    return interruptOnAnotherThreadAfterDelay(es, 0);
   }
 
   public static void interruptThisThreadFromAnotherThreadAfterDelay(long delayMillis) {

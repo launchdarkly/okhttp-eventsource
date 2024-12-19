@@ -97,6 +97,7 @@ public class EventSource implements Closeable {
   // be modified from other threads if they call stop() or interrupt(). We
   // use AtomicReference because we need atomicity in updates.
   private final AtomicReference<Closeable> connectionCloser = new AtomicReference<>();
+  private final AtomicReference<Closeable> responseCloser = new AtomicReference<>();
   private final AtomicReference<Thread> readingThread = new AtomicReference<>();
   private final AtomicReference<ReadyState> readyState;
 
@@ -308,12 +309,13 @@ public class EventSource implements Closeable {
           // transparently.
           continue;
         }
-        // The ErrorStrategy told us to THROW rather than CONTINUE. 
+        // The ErrorStrategy told us to THROW rather than CONTINUE.
         throw exception;
       }
       
       
-      connectionCloser.set(clientResult.getCloser());
+      connectionCloser.set(clientResult.getConnectionCloser());
+      responseCloser.set(clientResult.getResponseCloser());
       origin = clientResult.getOrigin() == null ? client.getOrigin() : clientResult.getOrigin();
       connectedTime = System.currentTimeMillis();
       logger.debug("Connected to SSE stream");
@@ -681,7 +683,20 @@ public class EventSource implements Closeable {
         }
       }
       if (oldReadingThread == Thread.currentThread()) {
+        Closeable oldResponseCloser = this.responseCloser.getAndSet(null);
         eventParser = null;
+        // Response can only be closed from reading thread. Otherwise, it will cause
+        // java.lang.IllegalStateException: Unbalanced enter/exit raised from okhttp
+        // since closing response will drain remaining chunks if exists, resulting in concurrent buffer source reading.
+        // which may conflict with reading thread.
+        if (oldResponseCloser != null) {
+          try {
+            oldResponseCloser.close();
+            logger.debug("Closed response");
+          } catch (IOException e) {
+            logger.warn("Unexpected error when closing response: {}", LogValues.exceptionSummary(e));
+          }
+        }
         readyState.compareAndSet(ReadyState.OPEN, ReadyState.CLOSED);
         readyState.compareAndSet(ReadyState.CONNECTING, ReadyState.CLOSED);
         // If the current thread is not the reading thread, these fields will be updated the
@@ -936,7 +951,7 @@ public class EventSource implements Closeable {
      *   // import com.launchdarkly.logging.*;
      *   
      *   builder.logger(
-     *      LDLogger.withAdapter(Logs.basic(), "logname") 
+     *      LDLogger.withAdapter(Logs.basic(), "logname")
      *   );
      * </code></pre>
      * <p>
@@ -975,16 +990,16 @@ public class EventSource implements Closeable {
      * first and {@code event:} second, {@link MessageEvent#getEventName()} will <i>not</i> contain the value of
      * {@code event:} but will be {@link MessageEvent#DEFAULT_EVENT_NAME} instead; similarly, an {@code id:} field will
      * be ignored if it appears after {@code data:} in this mode. Therefore, you should only use this mode if the
-     * server's behavior is predictable in this regard.</li>  
+     * server's behavior is predictable in this regard.</li>
      * <li> The SSE protocol specifies that an event should be processed only if it is terminated by a blank line, but
      * in this mode the handler will receive the event as soon as a {@code data:} field appears-- so, if the stream
      * happens to cut off abnormally without a trailing blank line, technically you will be receiving an incomplete
      * event that should have been ignored. You will know this has happened ifbecause reading from the Reader throws
      * a {@link StreamClosedWithIncompleteMessageException}.</li>
-     * </ul>  
+     * </ul>
      * 
      * @param streamEventData true if events should be dispatched immediately with asynchronous data rather than
-     *   read fully before dispatch 
+     *   read fully before dispatch
      * @return the builder
      * @see #expectFields(String...)
      * @since 2.6.0

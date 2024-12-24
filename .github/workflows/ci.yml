@@ -1,0 +1,92 @@
+name: Quality control checks
+
+on:
+  push:
+    branches: [ main, 'feat/**' ]
+    paths-ignore:
+      - '**.md' # Do not need to run CI for markdown changes.
+  pull_request:
+    branches: [ main, 'feat/**' ]
+    paths-ignore:
+      - '**.md'
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        java-version: ["8", "11", "17"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin' # See 'Supported distributions' for available options
+          java-version: ${{ matrix.java-version }}
+
+      - run: ./gradlew dependencies
+      - run: ./gradlew jar
+      - run: ./gradlew checkstyleMain
+
+      - run: make test
+
+      - name: Generate test coverage report
+        run: |
+            ./gradlew jacocoTestReport
+            mkdir -p coverage/
+            cp -r build/reports/jacoco/test/* ./coverage
+      - name: Enforce test coverage
+        run: ./gradlew jacocoTestCoverageVerification
+
+      - name: Save test results
+        run: |
+            mkdir -p ~/junit/;
+            find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/junit/ \;
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.java-version }} junit results
+          path: ~/junit
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.java-version }} code coverage
+          path: ./coverage
+
+      - name: run contract tests
+        run: make contract-tests
+
+  windows:
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: powershell
+
+    strategy:
+      fail-fast: false
+      matrix:
+        java-version: ["11.0.2.01", "17.0.1"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install OpenJDK
+        run: choco install openjdk --version ${{ matrix.java-version }}
+
+      - run: java -version
+
+      - name: build and test
+        run: .\gradlew.bat --no-daemon test
+
+      - name: save test results
+        run: |
+            mkdir .\junit
+            cp build/test-results/test/*.xml junit
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.java-version }} junit results
+          path: .\junit

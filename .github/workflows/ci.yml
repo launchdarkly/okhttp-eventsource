@@ -79,7 +79,7 @@ jobs:
       - run: java -version
 
       - name: build and test
-        run: .\gradlew.bat test
+        run: .\gradlew.bat --no-daemon test
 
       - name: save test results
         run: |

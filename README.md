@@ -1,6 +1,6 @@
 # okhttp-eventsource
 
-[![Circle CI](https://circleci.com/gh/launchdarkly/okhttp-eventsource.svg?style=shield)](https://circleci.com/gh/launchdarkly/okhttp-eventsource)
+[![Actions Status](https://github.com/launchdarkly/okhttp-eventsource/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/launchdarkly/okhttp-eventsource/actions/workflows/ci.yml)
 [![Javadocs](http://javadoc.io/badge/com.launchdarkly/okhttp-eventsource.svg)](http://javadoc.io/doc/com.launchdarkly/okhttp-eventsource)
 
 ## Overview

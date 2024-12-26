@@ -319,7 +319,7 @@ public class HttpConnectStrategyTest {
         int n = stream.read(b, 0, 5);
         assertThat(n, equalTo(5));
         
-        result.getCloser().close();
+        result.getConnectionCloser().close();
         // This causes us to call the OkHttp method Call.cancel(). The InputStream is
         // expected to throw an IOException on the next read, but it would also be
         // acceptable for it to return EOF (-1).
@@ -371,7 +371,7 @@ public class HttpConnectStrategyTest {
     try (HttpServer server = HttpServer.start(Handlers.status(200))) {
       try (ConnectStrategy.Client client = hcs.uri(server.getUri()).createClient(testLogger.getLogger())) {
         ConnectStrategy.Client.Result result = client.connect(lastEventId);
-        result.getCloser().close();
+        result.getConnectionCloser().close();
 
         return server.getRecorder().requireRequest();
       }

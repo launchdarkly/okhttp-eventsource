@@ -73,6 +73,8 @@ dependencies {
     testImplementation("com.google.guava:guava:32.0.1-jre")
     testImplementation("junit:junit:4.12")
     testImplementation("org.hamcrest:hamcrest-all:1.3")
+    // Inspect private fields in tests.
+    testImplementation("org.easytesting:fest-reflect:1.4.1")
 }
 
 checkstyle {

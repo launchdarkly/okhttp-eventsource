@@ -465,8 +465,11 @@ public class HttpConnectStrategy extends ConnectStrategy {
       return new Result(
           responseBody.byteStream(),
           uri,
-          new RequestCloser(call)
-          );
+          new RequestCloser(call),
+          // prevent from connection leak warning from okhttp.
+          // see: okhttp3.internal.connection.RealConnectionPool.pruneAndGetAllocationCount
+          new ResponseCloser(response)
+      );
     }
     
     public void close() {
@@ -552,6 +555,19 @@ public class HttpConnectStrategy extends ConnectStrategy {
     public void close() throws IOException {
       // EventSource calls this if it is deliberately stopping the stream via stop() or interrupt().
       call.cancel();
+    }
+  }
+
+  private static class ResponseCloser implements Closeable {
+    private final Response response;
+
+    public ResponseCloser(Response response) {
+      this.response = response;
+    }
+
+    @Override
+    public void close() throws IOException {
+      this.response.close();
     }
   }
 

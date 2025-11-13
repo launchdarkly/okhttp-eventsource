@@ -111,11 +111,11 @@ public class HttpConnectStrategy extends ConnectStrategy {
     public Request transformRequest(Request input);
   }
   
-  HttpConnectStrategy(URI uri) {
+  public HttpConnectStrategy(URI uri) {
     this(uri, null, null, null);
   }
   
-  private HttpConnectStrategy(
+  public HttpConnectStrategy(
       URI uri,
       ClientConfigurer clientConfigurer,
       OkHttpClient httpClient,

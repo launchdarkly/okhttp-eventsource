@@ -65,18 +65,34 @@ public abstract class ConnectStrategy {
       private final InputStream inputStream;
       private final URI origin;
       private final Closeable closer;
-      
+      private final ResponseHeaders headers;
+
       /**
        * Creates an instance.
-       * 
+       *
        * @param inputStream see {@link #getInputStream()}
        * @param origin see {@link #getOrigin()}
        * @param closer see {@link #getCloser()}
        */
       public Result(InputStream inputStream, URI origin, Closeable closer) {
+        this(inputStream, origin, closer, null);
+      }
+
+      /**
+       * Creates an instance with response headers.
+       *
+       * @param inputStream see {@link #getInputStream()}
+       * @param origin see {@link #getOrigin()}
+       * @param closer see {@link #getCloser()}
+       * @param headers see {@link #getHeaders()}
+       *
+       * @since 4.2.0
+       */
+      public Result(InputStream inputStream, URI origin, Closeable closer, ResponseHeaders headers) {
         this.inputStream = inputStream;
         this.origin = origin;
         this.closer = closer;
+        this.headers = headers;
       }
       
       /**
@@ -117,6 +133,19 @@ public abstract class ConnectStrategy {
        */
       public Closeable getCloser() {
         return closer;
+      }
+
+      /**
+       * Returns the response headers from the connection, or null if not available.
+       * <p>
+       * For HTTP connections, this contains the HTTP response headers. For other
+       * connection types, this may be null or may contain connection-specific metadata.
+       *
+       * @return the response headers, or null if not available
+       * @since 4.2.0
+       */
+      public ResponseHeaders getHeaders() {
+        return headers;
       }
     }
     

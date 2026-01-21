@@ -32,50 +32,69 @@ public class MessageEvent implements StreamEvent {
   private final String eventName;
   private final String lastEventId;
   private final URI origin;
+  private final ResponseHeaders headers;
 
   /**
    * Simple constructor with event data only, using the default event name.
    * <p>
    * This constructor assumes that the event data has been fully read into memory as a String.
-   * 
+   *
    * @param data the event data; if null, will be changed to an empty string
    */
   public MessageEvent(String data) {
-    this(null, data, null, null);
+    this(null, data, null, null, null);
   }
 
   /**
    * Constructs a new instance with the default event name.
    * <p>
    * This constructor assumes that the event data has been fully read into memory as a String.
-   * 
+   *
    * @param data the event data; if null, will be changed to an empty string
    * @param lastEventId the event ID, or null if none
    * @param origin the stream endpoint
    */
   public MessageEvent(String data, String lastEventId, URI origin) {
-    this(null, data, lastEventId, origin);
+    this(null, data, lastEventId, origin, null);
   }
 
   /**
    * Constructs a new instance.
    * <p>
    * This constructor assumes that the event data has been fully read into memory as a String.
-   * 
+   *
    * @param eventName the event name; if null, {@link #DEFAULT_EVENT_NAME} is used
    * @param data the event data; if null, will be changed to an empty string
    * @param lastEventId the event ID, or null if none
    * @param origin the stream endpoint
-   * 
+   *
    * @since 2.6.0
    */
   public MessageEvent(String eventName, String data, String lastEventId, URI origin) {
+    this(eventName, data, lastEventId, origin, null);
+  }
+
+  /**
+   * Constructs a new instance with response headers.
+   * <p>
+   * This constructor assumes that the event data has been fully read into memory as a String.
+   *
+   * @param eventName the event name; if null, {@link #DEFAULT_EVENT_NAME} is used
+   * @param data the event data; if null, will be changed to an empty string
+   * @param lastEventId the event ID, or null if none
+   * @param origin the stream endpoint
+   * @param headers the response headers from the current connection, or null if not available
+   *
+   * @since 4.2.0
+   */
+  public MessageEvent(String eventName, String data, String lastEventId, URI origin, ResponseHeaders headers) {
     this.eventName = eventName == null ? DEFAULT_EVENT_NAME : eventName;
     this.data = data == null ? "" : data;
     this.dataReader = null;
     this.dataReaderLock = new Object();
     this.lastEventId = lastEventId;
     this.origin = origin;
+    this.headers = headers;
   }
 
   /**
@@ -85,12 +104,12 @@ public class MessageEvent implements StreamEvent {
    * optimization that sometimes allows events to be processed without large buffers. The caller
    * must be careful about using this model because the behavior of the reader is not idempotent;
    * see {@link #getDataReader()}.
-   * 
+   *
    * @param eventName an object that will provide the event name if requested
    * @param dataReader a {@link Reader} for consuming the event data
    * @param lastEventId an object that will provide the last event ID if requested
    * @param origin the stream endpoint
-   * 
+   *
    * @see #getDataReader()
    * @since 2.6.0
    */
@@ -100,22 +119,50 @@ public class MessageEvent implements StreamEvent {
       String lastEventId,
       URI origin
       ) {
+    this(eventName, dataReader, lastEventId, origin, null);
+  }
+
+  /**
+   * Constructs a new instance with lazy-loading behavior and response headers.
+   * <p>
+   * This constructor takes a {@link Reader} instead of a String for the event data. This is an
+   * optimization that sometimes allows events to be processed without large buffers. The caller
+   * must be careful about using this model because the behavior of the reader is not idempotent;
+   * see {@link #getDataReader()}.
+   *
+   * @param eventName an object that will provide the event name if requested
+   * @param dataReader a {@link Reader} for consuming the event data
+   * @param lastEventId an object that will provide the last event ID if requested
+   * @param origin the stream endpoint
+   * @param headers the response headers from the current connection, or null if not available
+   *
+   * @see #getDataReader()
+   * @since 4.2.0
+   */
+  public MessageEvent(
+      String eventName,
+      Reader dataReader,
+      String lastEventId,
+      URI origin,
+      ResponseHeaders headers
+      ) {
     this.data = null;
     this.dataReader = dataReader;
     this.dataReaderLock = new Object();
     this.eventName = eventName == null ? DEFAULT_EVENT_NAME : eventName;
     this.lastEventId = lastEventId;
     this.origin = origin;
+    this.headers = headers;
   }
 
   /**
    * Constructs a new instance.
-   * 
+   *
    * @param eventName the event name
    * @param data the event data, if any
    */
   public MessageEvent(String eventName, String data) {
-    this(eventName, data, null, null);
+    this(eventName, data, null, null, null);
   }
 
   /**
@@ -228,6 +275,20 @@ public class MessageEvent implements StreamEvent {
    */
   public URI getOrigin() {
     return origin;
+  }
+
+  /**
+   * Returns the response headers from the current connection, or null if not available.
+   * <p>
+   * For HTTP connections, this contains the HTTP response headers that were received when
+   * the connection was established. These headers remain the same for all events received
+   * on this connection.
+   *
+   * @return the response headers, or null if not available
+   * @since 4.2.0
+   */
+  public ResponseHeaders getHeaders() {
+    return headers;
   }
 
   /**

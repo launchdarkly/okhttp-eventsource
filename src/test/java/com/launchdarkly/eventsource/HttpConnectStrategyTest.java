@@ -269,6 +269,167 @@ public class HttpConnectStrategyTest {
   }
 
   @Test
+  public void responseHeadersAreAvailableOnSuccess() throws Exception {
+    Handler response = Handlers.all(
+        Handlers.header("X-Custom-Header", "custom-value"),
+        Handlers.header("X-Request-Id", "12345"),
+        Handlers.startChunks("text/plain", Charset.forName("UTF-8")),
+        Handlers.writeChunkString("hello"),
+        Handlers.hang()
+        );
+    try (HttpServer server = HttpServer.start(response)) {
+      try (ConnectStrategy.Client client = ConnectStrategy.http(server.getUri())
+          .createClient(testLogger.getLogger())) {
+        ConnectStrategy.Client.Result result = client.connect(null);
+
+        ResponseHeaders headers = result.getHeaders();
+        assertThat(headers, Matchers.notNullValue());
+        assertThat(headers.size(), Matchers.greaterThan(0));
+
+        // Find and verify our custom headers
+        boolean foundCustomHeader = false;
+        boolean foundRequestId = false;
+        boolean foundContentType = false;
+
+        for (int i = 0; i < headers.size(); i++) {
+          ResponseHeaders.Header header = headers.get(i);
+          if (header.getName().equalsIgnoreCase("X-Custom-Header")) {
+            assertThat(header.getValue(), equalTo("custom-value"));
+            foundCustomHeader = true;
+          } else if (header.getName().equalsIgnoreCase("X-Request-Id")) {
+            assertThat(header.getValue(), equalTo("12345"));
+            foundRequestId = true;
+          } else if (header.getName().equalsIgnoreCase("Content-Type")) {
+            assertThat(header.getValue(), equalTo("text/plain;charset=utf-8"));
+            foundContentType = true;
+          }
+        }
+
+        assertThat("Should find X-Custom-Header", foundCustomHeader, equalTo(true));
+        assertThat("Should find X-Request-Id", foundRequestId, equalTo(true));
+        assertThat("Should find Content-Type", foundContentType, equalTo(true));
+
+        result.getCloser().close();
+      }
+    }
+  }
+
+  @Test
+  public void responseHeadersAreAvailableOnHttpError() throws Exception {
+    Handler errorResponse = Handlers.all(
+        Handlers.header("X-Error-Code", "RATE_LIMIT_EXCEEDED"),
+        Handlers.header("Retry-After", "60"),
+        Handlers.header("X-RateLimit-Remaining", "0"),
+        Handlers.status(429)
+        );
+    try (HttpServer server = HttpServer.start(errorResponse)) {
+      try (ConnectStrategy.Client client = ConnectStrategy.http(server.getUri())
+          .createClient(testLogger.getLogger())) {
+        try {
+          client.connect(null);
+          fail("expected exception");
+        } catch (StreamHttpErrorException e) {
+          assertThat(e.getCode(), equalTo(429));
+
+          ResponseHeaders headers = e.getHeaders();
+          assertThat(headers, Matchers.notNullValue());
+
+          // Find and verify our custom error headers
+          boolean foundErrorCode = false;
+          boolean foundRetryAfter = false;
+          boolean foundRateLimitRemaining = false;
+
+          for (int i = 0; i < headers.size(); i++) {
+            ResponseHeaders.Header header = headers.get(i);
+            if (header.getName().equalsIgnoreCase("X-Error-Code")) {
+              assertThat(header.getValue(), equalTo("RATE_LIMIT_EXCEEDED"));
+              foundErrorCode = true;
+            } else if (header.getName().equalsIgnoreCase("Retry-After")) {
+              assertThat(header.getValue(), equalTo("60"));
+              foundRetryAfter = true;
+            } else if (header.getName().equalsIgnoreCase("X-RateLimit-Remaining")) {
+              assertThat(header.getValue(), equalTo("0"));
+              foundRateLimitRemaining = true;
+            }
+          }
+
+          assertThat("Should find X-Error-Code", foundErrorCode, equalTo(true));
+          assertThat("Should find Retry-After", foundRetryAfter, equalTo(true));
+          assertThat("Should find X-RateLimit-Remaining", foundRateLimitRemaining, equalTo(true));
+        }
+      }
+    }
+  }
+
+  @Test
+  public void responseHeadersValueHelperMethod() throws Exception {
+    Handler response = Handlers.all(
+        Handlers.header("X-Test-Header", "test-value"),
+        Handlers.startChunks("text/plain", Charset.forName("UTF-8")),
+        Handlers.writeChunkString("hello"),
+        Handlers.hang()
+        );
+    try (HttpServer server = HttpServer.start(response)) {
+      try (ConnectStrategy.Client client = ConnectStrategy.http(server.getUri())
+          .createClient(testLogger.getLogger())) {
+        ConnectStrategy.Client.Result result = client.connect(null);
+
+        ResponseHeaders headers = result.getHeaders();
+        assertThat(headers, Matchers.notNullValue());
+
+        // Test value() returns the header value
+        assertThat(headers.value("X-Test-Header"), equalTo("test-value"));
+
+        // Test case-insensitivity
+        assertThat(headers.value("x-test-header"), equalTo("test-value"));
+        assertThat(headers.value("X-TEST-HEADER"), equalTo("test-value"));
+
+        // Test that missing headers return null
+        assertThat(headers.value("X-Nonexistent"), nullValue());
+
+        result.getCloser().close();
+      }
+    }
+  }
+
+  @Test
+  public void responseHeadersWithMultipleValuesForSameHeader() throws Exception {
+    Handler response = Handlers.all(
+        // The test-helper will combine these headers, versus them being different header lines, this is different
+        // from what an HTTP server *may* choose to do. So we cannot validate the version with multiple header lines,
+        // and instead these headers are combined into a single header with multiple values (comma separated).
+        Handlers.addHeader("Set-Cookie", "cookie1=value1"),
+        Handlers.addHeader("Set-Cookie", "cookie2=value2"),
+        Handlers.startChunks("text/plain", Charset.forName("UTF-8")),
+        Handlers.writeChunkString("hello"),
+        Handlers.hang()
+        );
+    try (HttpServer server = HttpServer.start(response)) {
+      try (ConnectStrategy.Client client = ConnectStrategy.http(server.getUri())
+          .createClient(testLogger.getLogger())) {
+        ConnectStrategy.Client.Result result = client.connect(null);
+
+        ResponseHeaders headers = result.getHeaders();
+        assertThat(headers, Matchers.notNullValue());
+
+        // Count how many Set-Cookie headers we have
+        int setCookieCount = 0;
+        for (int i = 0; i < headers.size(); i++) {
+          if (headers.get(i).getName().equalsIgnoreCase("Set-Cookie")) {
+            setCookieCount++;
+          }
+        }
+
+        // We should have at least 1 Set-Cookie header
+        // (the test server may combine them or keep them separate)
+        assertThat("Should have at least one Set-Cookie header", setCookieCount, Matchers.greaterThanOrEqualTo(1));
+
+        result.getCloser().close();
+      }
+    }
+  }
+
+  @Test
   public void requestFailsWithIOException() throws Exception {
     try (TcpServer server = TcpServer.start(TcpHandlers.noResponse())) {
       try (ConnectStrategy.Client client = ConnectStrategy.http(server.getHttpUri())

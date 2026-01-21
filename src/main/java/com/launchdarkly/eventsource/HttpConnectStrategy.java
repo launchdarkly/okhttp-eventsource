@@ -443,10 +443,10 @@ public class HttpConnectStrategy extends ConnectStrategy {
     @Override
     public Result connect(String lastEventId) throws StreamException {
       logger.debug("Attempting to connect to SSE stream at {}", uri);
-      
+
       Request request = createRequest(lastEventId);
       Call call = httpClient.newCall(request);
-      
+
       Response response;
       try {
         response = call.execute();
@@ -454,18 +454,21 @@ public class HttpConnectStrategy extends ConnectStrategy {
         logger.info("Connection failed: {}", LogValues.exceptionSummary(e));
         throw new StreamIOException(e);
       }
-        
+
       if (!response.isSuccessful()) {
+        ResponseHeaders headers = ResponseHeadersImpl.fromOkHttpHeaders(response.headers());
         response.close();
         logger.info("Server returned HTTP error {}", response.code());
-        throw new StreamHttpErrorException(response.code());
+        throw new StreamHttpErrorException(response.code(), headers);
       }
-  
+
+      ResponseHeaders headers = ResponseHeadersImpl.fromOkHttpHeaders(response.headers());
       ResponseBody responseBody = response.body();
       return new Result(
           responseBody.byteStream(),
           uri,
-          new RequestCloser(call)
+          new RequestCloser(call),
+          headers
           );
     }
     

@@ -301,14 +301,19 @@ public class EventSource implements Closeable {
         if (applyErrorStrategy(exception) == ErrorStrategy.Action.CONTINUE) {
           // The ErrorStrategy told us to CONTINUE rather than throwing an exception.
           if (canReturnFaultEvent) {
-            return new FaultEvent(exception);
+            // Extract headers from exception if available
+            ResponseHeaders headers = null;
+            if (exception instanceof StreamHttpErrorException) {
+              headers = ((StreamHttpErrorException) exception).getHeaders();
+            }
+            return new FaultEvent(exception, headers);
           }
           // If canReturnFaultEvent is false, it means the caller explicitly called start(),
           // in which case there's no way to return a FaultEvent so we just keep retrying
           // transparently.
           continue;
         }
-        // The ErrorStrategy told us to THROW rather than CONTINUE. 
+        // The ErrorStrategy told us to THROW rather than CONTINUE.
         throw exception;
       }
       
@@ -317,14 +322,16 @@ public class EventSource implements Closeable {
       origin = clientResult.getOrigin() == null ? client.getOrigin() : clientResult.getOrigin();
       connectedTime = System.currentTimeMillis();
       logger.debug("Connected to SSE stream");
-      
+
+      ResponseHeaders headers = clientResult.getHeaders();
       eventParser = new EventParser(
           clientResult.getInputStream(),
           clientResult.getOrigin(),
           readBufferSize,
           streamEventData,
           expectFields,
-          logger
+          logger,
+          headers
           );
       
       readyState.set(ReadyState.OPEN);
@@ -624,7 +631,9 @@ public class EventSource implements Closeable {
       eventParser = null;
       computeReconnectDelay();
       if (applyErrorStrategy(e) == ErrorStrategy.Action.CONTINUE) {
-        return new FaultEvent(e);
+        // At this point we're handling errors from reading the stream (not initial connection),
+        // so we never have HTTP response headers available (headers is always null)
+        return new FaultEvent(e, null);
       }
       throw e;
     }

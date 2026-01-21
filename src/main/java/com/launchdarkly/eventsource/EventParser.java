@@ -50,6 +50,7 @@ final class EventParser {
   private Set<String> expectFields;
   private final LDLogger logger;
   private final URI origin;
+  private final ResponseHeaders headers;
 
   private BufferedLineParser lineParser;
   private byte[] chunkData;
@@ -77,14 +78,16 @@ final class EventParser {
       int readBufferSize,
       boolean streamEventData,
       Set<String> expectFields,
-      LDLogger logger
+      LDLogger logger,
+      ResponseHeaders headers
       ) {
     this.lineParser = new BufferedLineParser(inputStream, readBufferSize);
     this.origin = origin;
     this.streamEventData = streamEventData;
     this.expectFields = expectFields;
     this.logger = logger;
-    
+    this.headers = headers;
+
     dataBuffer = new ByteArrayOutputStream(VALUE_BUFFER_INITIAL_CAPACITY);
   }
 
@@ -159,7 +162,7 @@ final class EventParser {
       }
       
       String dataString = utf8ByteArrayOutputStreamToString(dataBuffer);
-      MessageEvent message = new MessageEvent(eventName, dataString, lastEventId, origin);
+      MessageEvent message = new MessageEvent(eventName, dataString, lastEventId, origin, headers);
       resetState();
       logger.debug("Received message: {}", message);
       return message;
@@ -193,7 +196,8 @@ final class EventParser {
             eventName,
             new InputStreamReader(messageDataStream),
             lastEventId,
-            origin
+            origin,
+            headers
             );
         logger.debug("Received message: {}", message);
         return message;

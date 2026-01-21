@@ -46,7 +46,8 @@ public abstract class EventParserBaseTest {
         bufferSize,
         streamEventData,
         expectedFields,
-        testLoggerRule.getLogger()
+        testLoggerRule.getLogger(),
+        null
         );
   }
   

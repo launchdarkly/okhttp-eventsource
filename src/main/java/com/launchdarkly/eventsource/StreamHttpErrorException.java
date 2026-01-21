@@ -13,14 +13,27 @@ package com.launchdarkly.eventsource;
 public class StreamHttpErrorException extends StreamException {
 
   private final int code;
+  private final ResponseHeaders headers;
 
   /**
    * Constructs an instance.
    * @param code the HTTP status
    */
   public StreamHttpErrorException(int code) {
+    this(code, null);
+  }
+
+  /**
+   * Constructs an instance with response headers.
+   * @param code the HTTP status
+   * @param headers the response headers, or null if not available
+   *
+   * @since 4.2.0
+   */
+  public StreamHttpErrorException(int code, ResponseHeaders headers) {
     super("Server returned HTTP error " + code);
     this.code = code;
+    this.headers = headers;
   }
 
   /**
@@ -29,5 +42,15 @@ public class StreamHttpErrorException extends StreamException {
    */
   public int getCode() {
     return code;
+  }
+
+  /**
+   * Returns the response headers from the failed HTTP request, or null if not available.
+   *
+   * @return the response headers, or null
+   * @since 4.2.0
+   */
+  public ResponseHeaders getHeaders() {
+    return headers;
   }
 }

@@ -631,12 +631,9 @@ public class EventSource implements Closeable {
       eventParser = null;
       computeReconnectDelay();
       if (applyErrorStrategy(e) == ErrorStrategy.Action.CONTINUE) {
-        // Extract headers from exception if available
-        ResponseHeaders headers = null;
-        if (e instanceof StreamHttpErrorException) {
-          headers = ((StreamHttpErrorException) e).getHeaders();
-        }
-        return new FaultEvent(e, headers);
+        // At this point we're handling errors from reading the stream (not initial connection),
+        // so we never have HTTP response headers available (headers is always null)
+        return new FaultEvent(e, null);
       }
       throw e;
     }

@@ -45,6 +45,50 @@ public class HttpConnectStrategyWithEventSourceTest {
   }
 
   @Test
+  public void eventSourceTracksLastEventId() throws Exception {
+    Handler response = Handlers.all(
+        Handlers.SSE.start(),
+        Handlers.writeChunkString("id: 123\nevent: message\ndata: first\n\n"),
+        Handlers.writeChunkString("id: 456\nevent: message\ndata: second\n\n"),
+        Handlers.hang()
+        );
+
+    try (HttpServer server = HttpServer.start(response)) {
+      try (EventSource es = new EventSource.Builder(server.getUri()).build()) {
+        es.start();
+
+        assertThat(es.readAnyEvent(), equalTo(
+            new MessageEvent("message", "first", "123", es.getOrigin())));
+
+        assertThat(es.readAnyEvent(), equalTo(
+            new MessageEvent("message", "second", "456", es.getOrigin())));
+
+        // Verify the EventSource tracks the last event ID
+        assertThat(es.getLastEventId(), equalTo("456"));
+      }
+    }
+  }
+
+  @Test
+  public void eventSourceHandlesRetryField() throws Exception {
+    Handler response = Handlers.all(
+        Handlers.SSE.start(),
+        Handlers.writeChunkString("retry: 5000\nevent: message\ndata: test\n\n"),
+        Handlers.hang()
+        );
+
+    try (HttpServer server = HttpServer.start(response)) {
+      try (EventSource es = new EventSource.Builder(server.getUri()).build()) {
+        es.start();
+
+        // The retry field should be processed internally, and we should still get the message
+        assertThat(es.readAnyEvent(), equalTo(
+            new MessageEvent("message", "test", null, es.getOrigin())));
+      }
+    }
+  }
+
+  @Test
   public void eventSourceReconnectsAfterSocketClosed() throws Exception {
     Handler response1 = Handlers.all(
         Handlers.SSE.start(),

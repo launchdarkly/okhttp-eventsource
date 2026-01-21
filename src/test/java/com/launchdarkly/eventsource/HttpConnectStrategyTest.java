@@ -430,6 +430,61 @@ public class HttpConnectStrategyTest {
   }
 
   @Test
+  public void responseHeadersEdgeCases() throws Exception {
+    Handler response = Handlers.all(
+        Handlers.header("X-Test", "value"),
+        Handlers.startChunks("text/plain", Charset.forName("UTF-8")),
+        Handlers.writeChunkString("hello"),
+        Handlers.hang()
+        );
+    try (HttpServer server = HttpServer.start(response)) {
+      try (ConnectStrategy.Client client = ConnectStrategy.http(server.getUri())
+          .createClient(testLogger.getLogger())) {
+        ConnectStrategy.Client.Result result = client.connect(null);
+
+        ResponseHeaders headers = result.getHeaders();
+        assertThat(headers, Matchers.notNullValue());
+
+        // Test value() with null parameter
+        assertThat(headers.value(null), nullValue());
+
+        // Test isEmpty() - headers should not be empty
+        assertThat(headers.isEmpty(), equalTo(false));
+
+        // Test toString() - just verify it doesn't throw
+        assertThat(headers.toString(), Matchers.notNullValue());
+
+        // Test Header.toString()
+        ResponseHeaders.Header header = headers.get(0);
+        assertThat(header.toString(), Matchers.notNullValue());
+        assertThat(header.toString(), Matchers.containsString(":"));
+
+        result.getCloser().close();
+      }
+    }
+  }
+
+  @Test
+  public void responseHeadersEmpty() throws Exception {
+    // Test the empty headers case by using ResponseHeadersImpl directly
+    ResponseHeaders empty = ResponseHeadersImpl.empty();
+    assertThat(empty, Matchers.notNullValue());
+    assertThat(empty.isEmpty(), equalTo(true));
+    assertThat(empty.size(), equalTo(0));
+    assertThat(empty.value("Any-Header"), nullValue());
+    assertThat(empty.toString(), Matchers.notNullValue());
+
+    // Test fromOkHttpHeaders with null
+    ResponseHeaders fromNull = ResponseHeadersImpl.fromOkHttpHeaders(null);
+    assertThat(fromNull.isEmpty(), equalTo(true));
+
+    // Test fromOkHttpHeaders with empty Headers
+    okhttp3.Headers emptyHeaders = new okhttp3.Headers.Builder().build();
+    ResponseHeaders fromEmpty = ResponseHeadersImpl.fromOkHttpHeaders(emptyHeaders);
+    assertThat(fromEmpty.isEmpty(), equalTo(true));
+  }
+
+  @Test
   public void requestFailsWithIOException() throws Exception {
     try (TcpServer server = TcpServer.start(TcpHandlers.noResponse())) {
       try (ConnectStrategy.Client client = ConnectStrategy.http(server.getHttpUri())

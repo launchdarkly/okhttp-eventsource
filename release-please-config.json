@@ -1,0 +1,14 @@
+{
+  "bootstrap-sha": "7cccc52e3859f8884b203fc80b52ad12c2203b08",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "versioning": "default",
+      "include-v-in-tag": false,
+      "include-component-in-tag": false,
+      "extra-files": [
+        "gradle.properties"
+      ]
+    }
+  }
+}

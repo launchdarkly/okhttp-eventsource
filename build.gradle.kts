@@ -3,9 +3,9 @@ import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.external.javadoc.CoreJavadocOptions
 import org.gradle.external.javadoc.StandardJavadocDocletOptions
 
-// These values come from gradle.properties
-val ossrhUsername: String by project
-val ossrhPassword: String by project
+// These values come from gradle.properties or command line
+val ossrhUsername: String? by project
+val ossrhPassword: String? by project
 
 buildscript {
     repositories {
@@ -16,15 +16,14 @@ buildscript {
 
 plugins {
     java
-    "java-library"
+    `java-library`
     checkstyle
     jacoco
     signing
-    "maven-publish"
+    `maven-publish`
     idea
     id("org.jetbrains.kotlin.jvm") version "1.6.10"
-    id("de.marcphilipp.nexus-publish") version "0.4.0"
-    id("io.codearte.nexus-staging") version "0.30.0"
+    id("io.github.gradle-nexus.publish-plugin") version "1.3.0" apply false
 }
 
 // Note about org.jetbrains.kotlin.jvm in the plugins block:
@@ -45,6 +44,12 @@ repositories {
     // Before LaunchDarkly release artifacts get synced to Maven Central they are here along with snapshots:
     maven { url = uri("https://oss.sonatype.org/content/groups/public/") }
     mavenCentral()
+}
+
+// Apply nexus-publish plugin only when this is the root project
+// (contract tests include this as a subproject, which would fail)
+if (project == rootProject) {
+    apply(plugin = "io.github.gradle-nexus.publish-plugin")
 }
 
 base {
@@ -179,11 +184,6 @@ idea {
     }
 }
 
-nexusStaging {
-    packageGroup = "com.launchdarkly"
-    numberOfRetries = 40 // we've seen extremely long delays in closing repositories
-}
-
 publishing {
     publications {
         create<MavenPublication>("mavenJava") {
@@ -221,16 +221,17 @@ publishing {
     }
 }
 
-nexusPublishing {
-    clientTimeout.set(Duration.ofMinutes(2)) // we've seen extremely long delays in creating repositories
-    repositories {
-        sonatype {
-            username.set(ossrhUsername)
-            password.set(ossrhPassword)
+// Only configure nexus publishing when this is the root project
+if (project == rootProject) {
+    configure<io.github.gradlenexus.publishplugin.NexusPublishExtension> {
+        clientTimeout.set(Duration.ofMinutes(2)) // we've seen extremely long delays in creating repositories
+        repositories {
+            sonatype()
         }
     }
 }
 
 signing {
+    setRequired({ findProperty("skipSigning") != "true" })
     sign(publishing.publications["mavenJava"])
 }

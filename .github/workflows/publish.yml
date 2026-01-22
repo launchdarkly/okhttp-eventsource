@@ -61,6 +61,10 @@ jobs:
           sonatype_username: ${{ env.SONATYPE_USER_NAME }}
           sonatype_password: ${{ env.SONATYPE_PASSWORD }}
 
+      - name: Build Documentation
+        shell: bash
+        run: ./gradlew javadoc
+
       # https://github.com/launchdarkly/gh-actions/releases/tag/publish-pages-v1.0.1
       - uses: launchdarkly/gh-actions/actions/publish-pages@d73db5e96be542144389c8c4b094844ab0f373bc # publish-pages-v1.0.1
         name: 'Publish to Github pages'

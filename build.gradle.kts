@@ -23,7 +23,7 @@ plugins {
     `maven-publish`
     idea
     id("org.jetbrains.kotlin.jvm") version "1.6.10"
-    id("io.github.gradle-nexus.publish-plugin") version "1.3.0"
+    id("io.github.gradle-nexus.publish-plugin") version "1.3.0" apply false
 }
 
 // Note about org.jetbrains.kotlin.jvm in the plugins block:
@@ -44,6 +44,12 @@ repositories {
     // Before LaunchDarkly release artifacts get synced to Maven Central they are here along with snapshots:
     maven { url = uri("https://oss.sonatype.org/content/groups/public/") }
     mavenCentral()
+}
+
+// Apply nexus-publish plugin only when this is the root project
+// (contract tests include this as a subproject, which would fail)
+if (project == rootProject) {
+    apply(plugin = "io.github.gradle-nexus.publish-plugin")
 }
 
 base {
@@ -215,10 +221,13 @@ publishing {
     }
 }
 
-nexusPublishing {
-    clientTimeout.set(Duration.ofMinutes(2)) // we've seen extremely long delays in creating repositories
-    repositories {
-        sonatype()
+// Only configure nexus publishing when this is the root project
+if (project == rootProject) {
+    configure<io.github.gradlenexus.publishplugin.NexusPublishExtension> {
+        clientTimeout.set(Duration.ofMinutes(2)) // we've seen extremely long delays in creating repositories
+        repositories {
+            sonatype()
+        }
     }
 }
 

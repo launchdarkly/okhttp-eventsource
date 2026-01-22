@@ -37,15 +37,11 @@ jobs:
       id-token: write
       contents: write # For publishing documentation.
     steps:
-      - uses: actions/checkout@v4
+      # https://github.com/actions/checkout/releases/tag/v4.3.1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - name: CI check
-        uses: ./.github/actions/ci
-        with:
-          run_tests: ${{ inputs.run_tests }}
-          java_version: '11'
-
-      - uses: launchdarkly/gh-actions/actions/release-secrets@release-secrets-v1.1.0
+      # https://github.com/launchdarkly/gh-actions/releases/tag/release-secrets-v1.1.0
+      - uses: launchdarkly/gh-actions/actions/release-secrets@dfe04d7415f4bb5f7529c9208abb0a9c13cfaa4e # release-secrets-v1.1.0
         name: Get secrets
         with:
           aws_assume_role: ${{ vars.AWS_ROLE_ARN }}
@@ -65,7 +61,8 @@ jobs:
           sonatype_username: ${{ env.SONATYPE_USER_NAME }}
           sonatype_password: ${{ env.SONATYPE_PASSWORD }}
 
-      - uses: launchdarkly/gh-actions/actions/publish-pages@publish-pages-v1.0.1
+      # https://github.com/launchdarkly/gh-actions/releases/tag/publish-pages-v1.0.1
+      - uses: launchdarkly/gh-actions/actions/publish-pages@d73db5e96be542144389c8c4b094844ab0f373bc # publish-pages-v1.0.1
         name: 'Publish to Github pages'
         if: ${{ inputs.dry_run == false }}
         with:

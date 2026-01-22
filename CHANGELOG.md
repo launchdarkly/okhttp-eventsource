@@ -2,6 +2,13 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [4.2.0](https://github.com/launchdarkly/okhttp-eventsource/compare/4.1.1...4.2.0) (2026-01-22)
+
+
+### Features
+
+* Add support for accessing response headers. ([#97](https://github.com/launchdarkly/okhttp-eventsource/issues/97)) ([7cccc52](https://github.com/launchdarkly/okhttp-eventsource/commit/7cccc52e3859f8884b203fc80b52ad12c2203b08))
+
 ## [4.1.1] - 2023-06-27
 ### Changed:
 - Bumping Guava version to incorporate CVE fixes.

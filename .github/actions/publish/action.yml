@@ -1,0 +1,39 @@
+name: Publish Package
+description: 'Publish the package to Sonatype'
+inputs:
+  dry_run:
+    description: 'Is this a dry run. If so no package will be published.'
+    required: true
+  prerelease:
+    description: 'Is this a prerelease. If so then it will be published to the staging repository only.'
+    required: true
+  signing_key_id:
+    description: 'Signing key ID'
+    required: true
+  signing_key_passphrase:
+    description: 'Signing key passphrase'
+    required: true
+  code_signing_keyring:
+    description: 'The path of the code signing keyring.'
+    required: true
+  sonatype_username:
+    description: 'Sonatype repo username.'
+    required: true
+  sonatype_password:
+    description: 'Sonatype repo password.'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Publish Library
+      shell: bash
+      env:
+        LD_RELEASE_IS_PRERELEASE: ${{ inputs.prerelease }}
+        LD_RELEASE_IS_DRYRUN: ${{ inputs.dry_run }}
+        SIGNING_KEY_ID: ${{ inputs.signing_key_id }}
+        SIGNING_KEY_PASSPHRASE: ${{ inputs.signing_key_passphrase }}
+        SIGNING_SECRET_KEY_RING_FILE: ${{ inputs.code_signing_keyring }}
+        SONATYPE_USER_NAME: ${{ inputs.sonatype_username }}
+        SONATYPE_PASSWORD: ${{ inputs.sonatype_password }}
+      run: source $GITHUB_ACTION_PATH/publish.sh

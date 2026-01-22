@@ -3,9 +3,9 @@ import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.external.javadoc.CoreJavadocOptions
 import org.gradle.external.javadoc.StandardJavadocDocletOptions
 
-// These values come from gradle.properties
-val ossrhUsername: String by project
-val ossrhPassword: String by project
+// These values come from gradle.properties or command line
+val ossrhUsername: String? by project
+val ossrhPassword: String? by project
 
 buildscript {
     repositories {
@@ -23,8 +23,7 @@ plugins {
     "maven-publish"
     idea
     id("org.jetbrains.kotlin.jvm") version "1.6.10"
-    id("de.marcphilipp.nexus-publish") version "0.4.0"
-    id("io.codearte.nexus-staging") version "0.30.0"
+    id("io.github.gradle-nexus.publish-plugin") version "1.3.0"
 }
 
 // Note about org.jetbrains.kotlin.jvm in the plugins block:
@@ -179,11 +178,6 @@ idea {
     }
 }
 
-nexusStaging {
-    packageGroup = "com.launchdarkly"
-    numberOfRetries = 40 // we've seen extremely long delays in closing repositories
-}
-
 publishing {
     publications {
         create<MavenPublication>("mavenJava") {
@@ -224,13 +218,11 @@ publishing {
 nexusPublishing {
     clientTimeout.set(Duration.ofMinutes(2)) // we've seen extremely long delays in creating repositories
     repositories {
-        sonatype {
-            username.set(ossrhUsername)
-            password.set(ossrhPassword)
-        }
+        sonatype()
     }
 }
 
 signing {
+    setRequired({ findProperty("skipSigning") != "true" })
     sign(publishing.publications["mavenJava"])
 }

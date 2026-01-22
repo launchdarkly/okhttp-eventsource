@@ -1,0 +1,78 @@
+name: Publish Package
+on:
+  workflow_dispatch:
+    inputs:
+      run_tests:
+        description: 'If true, run unit tests, otherwise skip them.'
+        type: boolean
+        default: true
+      dry_run:
+        description: 'Is this a dry run. If so no package will be published.'
+        type: boolean
+        required: true
+      prerelease:
+        description: 'If true, then this is a prerelease and should be published to the staging repository only.'
+        type: boolean
+        required: true
+  workflow_call:
+    inputs:
+      run_tests:
+        description: 'If true, run unit tests, otherwise skip them.'
+        required: false
+        type: boolean
+        default: true
+      dry_run:
+        description: 'Is this a dry run. If so no package will be published.'
+        type: boolean
+        required: true
+      prerelease:
+        description: 'If true, then this is a prerelease and should be published to the staging repository only.'
+        type: boolean
+        required: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write # For publishing documentation.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: CI check
+        uses: ./.github/actions/ci
+        with:
+          run_tests: ${{ inputs.run_tests }}
+          java_version: '11'
+
+      - uses: launchdarkly/gh-actions/actions/release-secrets@release-secrets-v1.1.0
+        name: Get secrets
+        with:
+          aws_assume_role: ${{ vars.AWS_ROLE_ARN }}
+          ssm_parameter_pairs: '/production/common/releasing/sonatype/username = SONATYPE_USER_NAME,
+          /production/common/releasing/sonatype/password = SONATYPE_PASSWORD,
+          /production/common/releasing/java/keyId = SIGNING_KEY_ID'
+          s3_path_pairs: 'launchdarkly-releaser/java/code-signing-keyring.gpg = code-signing-keyring.gpg'
+
+      - name: Publish
+        uses: ./.github/actions/publish
+        with:
+          dry_run: ${{ inputs.dry_run }}
+          prerelease: ${{ inputs.prerelease }}
+          signing_key_id: ${{ env.SIGNING_KEY_ID }}
+          signing_key_passphrase: ''
+          code_signing_keyring: 'code-signing-keyring.gpg'
+          sonatype_username: ${{ env.SONATYPE_USER_NAME }}
+          sonatype_password: ${{ env.SONATYPE_PASSWORD }}
+
+      - uses: launchdarkly/gh-actions/actions/publish-pages@publish-pages-v1.0.1
+        name: 'Publish to Github pages'
+        if: ${{ inputs.dry_run == false }}
+        with:
+          docs_path: build/docs/javadoc
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Dry Run Publish Docs
+        shell: bash
+        if: ${{ inputs.dry_run == true }}
+        run: echo "Dry run. Not publishing docs."

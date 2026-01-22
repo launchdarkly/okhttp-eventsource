@@ -16,11 +16,11 @@ buildscript {
 
 plugins {
     java
-    "java-library"
+    `java-library`
     checkstyle
     jacoco
     signing
-    "maven-publish"
+    `maven-publish`
     idea
     id("org.jetbrains.kotlin.jvm") version "1.6.10"
     id("io.github.gradle-nexus.publish-plugin") version "1.3.0"

@@ -19,7 +19,7 @@ plugins {
     `maven-publish`
     idea
     id("org.jetbrains.kotlin.jvm") version "1.6.10"
-    id("io.github.gradle-nexus.publish-plugin") version "1.3.0" apply false
+    id("io.github.gradle-nexus.publish-plugin") version "1.3.0"
 }
 
 // Note about org.jetbrains.kotlin.jvm in the plugins block:
@@ -217,15 +217,12 @@ publishing {
     }
 }
 
-// Only configure nexus publishing when this is the root project
-if (project == rootProject) {
-    configure<io.github.gradlenexus.publishplugin.NexusPublishExtension> {
-        clientTimeout.set(Duration.ofMinutes(2)) // we've seen extremely long delays in creating repositories
-        repositories {
-            sonatype {
-                nexusUrl.set(uri("https://ossrh-staging-api.central.sonatype.com/service/local/"))
-                snapshotRepositoryUrl.set(uri("https://central.sonatype.com/repository/maven-snapshots/"))
-            }
+nexusPublishing {
+    clientTimeout.set(Duration.ofMinutes(2)) // we've seen extremely long delays in creating repositories
+    repositories {
+        sonatype{
+            nexusUrl.set(uri("https://ossrh-staging-api.central.sonatype.com/service/local/"))
+            snapshotRepositoryUrl.set(uri("https://central.sonatype.com/repository/maven-snapshots/"))
         }
     }
 }

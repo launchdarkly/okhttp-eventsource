@@ -3,10 +3,6 @@ import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.external.javadoc.CoreJavadocOptions
 import org.gradle.external.javadoc.StandardJavadocDocletOptions
 
-// These values come from gradle.properties or command line
-val ossrhUsername: String? by project
-val ossrhPassword: String? by project
-
 buildscript {
     repositories {
         mavenCentral()

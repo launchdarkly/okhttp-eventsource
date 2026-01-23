@@ -3,10 +3,6 @@ import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.external.javadoc.CoreJavadocOptions
 import org.gradle.external.javadoc.StandardJavadocDocletOptions
 
-// These values come from gradle.properties or command line
-val ossrhUsername: String? by project
-val ossrhPassword: String? by project
-
 buildscript {
     repositories {
         mavenCentral()
@@ -226,7 +222,10 @@ if (project == rootProject) {
     configure<io.github.gradlenexus.publishplugin.NexusPublishExtension> {
         clientTimeout.set(Duration.ofMinutes(2)) // we've seen extremely long delays in creating repositories
         repositories {
-            sonatype()
+            sonatype {
+                nexusUrl.set(uri("https://ossrh-staging-api.central.sonatype.com/service/local/"))
+                snapshotRepositoryUrl.set(uri("https://central.sonatype.com/repository/maven-snapshots/"))
+            }
         }
     }
 }

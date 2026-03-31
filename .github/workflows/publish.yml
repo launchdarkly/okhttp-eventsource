@@ -31,7 +31,24 @@ on:
         required: true
 
 jobs:
+  ci:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # false = do not cancel sibling matrix jobs when one leg fails
+      matrix:
+        java-version: ["8", "11", "17"]
+    steps:
+      # https://github.com/actions/checkout/releases/tag/v4.3.1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Shared CI
+        uses: ./.github/actions/ci
+        with:
+          java_version: ${{ matrix.java-version }}
+          run_tests: ${{ inputs.run_tests }}
+
   build-and-publish:
+    needs: ci
     runs-on: ubuntu-latest
     permissions:
       id-token: write

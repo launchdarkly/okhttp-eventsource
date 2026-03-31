@@ -15,30 +15,18 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
-      fail-fast: false
+      fail-fast: false # false = do not cancel sibling matrix jobs when one leg fails
       matrix:
         java-version: ["8", "11", "17"]
 
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+
+      - name: Shared CI
+        uses: ./.github/actions/ci
         with:
-          distribution: 'temurin' # See 'Supported distributions' for available options
-          java-version: ${{ matrix.java-version }}
-
-      - run: ./gradlew dependencies
-      - run: ./gradlew jar
-      - run: ./gradlew checkstyleMain
-
-      - run: make test
-
-      - name: Generate test coverage report
-        run: |
-            ./gradlew jacocoTestReport
-            mkdir -p coverage/
-            cp -r build/reports/jacoco/test/* ./coverage
-      - name: Enforce test coverage
-        run: ./gradlew jacocoTestCoverageVerification
+          java_version: ${{ matrix.java-version }}
+          run_tests: true
 
       - name: Save test results
         run: |
@@ -55,7 +43,8 @@ jobs:
           name: ${{ matrix.java-version }} code coverage
           path: ./coverage
 
-      - name: run contract tests
+      # After junit/coverage artifacts: contract test failures must not skip uploads above.
+      - name: Contract tests
         run: make contract-tests
 
   windows:
@@ -66,7 +55,7 @@ jobs:
         shell: powershell
 
     strategy:
-      fail-fast: false
+      fail-fast: false # false = do not cancel sibling matrix jobs when one leg fails
       matrix:
         java-version: ["11.0.2.01", "17.0.1"]
 

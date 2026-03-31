@@ -1,0 +1,57 @@
+name: Shared CI
+description: Shared build, style, test, and coverage steps for okhttp-eventsource.
+inputs:
+  java_version:
+    description: 'Java version to use (e.g. 8, 11, 17).'
+    required: true
+  run_tests:
+    description: 'If true, run unit tests, coverage report, and coverage verification.'
+    required: false
+    default: 'true'
+  run_contract_tests:
+    description: 'If true, run SSE contract tests (slower; needs network).'
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: ${{ inputs.java_version }}
+
+    - name: Restore dependencies
+      shell: bash
+      run: ./gradlew dependencies
+
+    - name: Build jar
+      shell: bash
+      run: ./gradlew jar
+
+    - name: Checkstyle
+      shell: bash
+      run: ./gradlew checkstyleMain
+
+    - name: Unit tests
+      if: ${{ inputs.run_tests == 'true' }}
+      shell: bash
+      run: make test
+
+    - name: Generate test coverage report
+      if: ${{ inputs.run_tests == 'true' }}
+      shell: bash
+      run: |
+        ./gradlew jacocoTestReport
+        mkdir -p coverage/
+        cp -r build/reports/jacoco/test/* ./coverage
+
+    - name: Enforce test coverage
+      if: ${{ inputs.run_tests == 'true' }}
+      shell: bash
+      run: ./gradlew jacocoTestCoverageVerification
+
+    - name: Contract tests
+      if: ${{ inputs.run_contract_tests == 'true' }}
+      shell: bash
+      run: make contract-tests

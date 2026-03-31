@@ -46,7 +46,6 @@ jobs:
         with:
           java_version: ${{ matrix.java-version }}
           run_tests: ${{ inputs.run_tests }}
-          run_contract_tests: false
 
   build-and-publish:
     needs: ci

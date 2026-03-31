@@ -27,7 +27,6 @@ jobs:
         with:
           java_version: ${{ matrix.java-version }}
           run_tests: true
-          run_contract_tests: true
 
       - name: Save test results
         run: |
@@ -43,6 +42,10 @@ jobs:
         with:
           name: ${{ matrix.java-version }} code coverage
           path: ./coverage
+
+      # After junit/coverage artifacts: contract test failures must not skip uploads above.
+      - name: Contract tests
+        run: make contract-tests
 
   windows:
     runs-on: windows-latest

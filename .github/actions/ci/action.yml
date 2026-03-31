@@ -8,10 +8,6 @@ inputs:
     description: 'If true, run unit tests, coverage report, and coverage verification.'
     required: false
     default: 'true'
-  run_contract_tests:
-    description: 'If true, run SSE contract tests (slower; needs network).'
-    required: false
-    default: 'false'
 
 runs:
   using: composite
@@ -50,8 +46,3 @@ runs:
       if: ${{ inputs.run_tests == 'true' }}
       shell: bash
       run: ./gradlew jacocoTestCoverageVerification
-
-    - name: Contract tests
-      if: ${{ inputs.run_contract_tests == 'true' }}
-      shell: bash
-      run: make contract-tests

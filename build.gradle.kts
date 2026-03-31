@@ -63,7 +63,7 @@ java {
 
 object Versions {
     const val launchdarklyLogging = "1.1.1"
-    const val okhttp = "4.9.3"
+    const val okhttp = "4.12.0"
 }
 
 dependencies {
@@ -71,8 +71,8 @@ dependencies {
     api("com.squareup.okhttp3:okhttp:${Versions.okhttp}")
     testImplementation("org.mockito:mockito-core:1.10.19")
     testImplementation("com.launchdarkly:test-helpers:2.1.0")
-    testImplementation("com.google.guava:guava:32.0.1-jre")
-    testImplementation("junit:junit:4.12")
+    testImplementation("com.google.guava:guava:33.5.0-jre")
+    testImplementation("junit:junit:4.13.2")
     testImplementation("org.hamcrest:hamcrest-all:1.3")
 }
 

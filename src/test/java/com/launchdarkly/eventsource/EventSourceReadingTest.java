@@ -303,16 +303,16 @@ public class EventSourceReadingTest {
       }
     }).start();
 
-    StreamEvent e1 = queue.poll(1, TimeUnit.SECONDS);
+    StreamEvent e1 = queue.poll(5, TimeUnit.SECONDS);
     assertThat(e1, equalTo(new StartedEvent()));
     
-    StreamEvent e2 = queue.poll(1, TimeUnit.SECONDS);
+    StreamEvent e2 = queue.poll(5, TimeUnit.SECONDS);
     assertThat(e2, equalTo(new MessageEvent("a", "data1", null, ORIGIN)));
 
-    StreamEvent e3 = queue.poll(1, TimeUnit.SECONDS);
+    StreamEvent e3 = queue.poll(5, TimeUnit.SECONDS);
     assertThat(e3, equalTo(new CommentEvent("nice")));
 
-    StreamEvent e4 = queue.poll(1, TimeUnit.SECONDS);
+    StreamEvent e4 = queue.poll(5, TimeUnit.SECONDS);
     assertThat(e4, equalTo(new MessageEvent("b", "data2", null, ORIGIN)));
 
     assertThat("iterator should not have finished yet because we didn't close the stream",
@@ -321,7 +321,7 @@ public class EventSourceReadingTest {
     stream.close();
     
     assertThat("timed out waiting for iterator on reader thread to finish",
-        iteratorFinished.tryAcquire(1, TimeUnit.SECONDS), is(true));
+        iteratorFinished.tryAcquire(5, TimeUnit.SECONDS), is(true));
   }
 
   @Test

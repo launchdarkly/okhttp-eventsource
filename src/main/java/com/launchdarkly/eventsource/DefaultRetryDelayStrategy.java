@@ -114,6 +114,23 @@ public class DefaultRetryDelayStrategy extends RetryDelayStrategy {
     this.backoffMultiplier = backoffMultiplier;
     this.jitterMultiplier = jitterMultiplier;
   }
+
+  // Package-private helper used by EventSource.setInitialRetryDelayMillis. Returns a
+  // copy with the exponent counter reset to 0 but the max delay, backoff multiplier,
+  // and jitter multiplier preserved. Ensures the next apply() uses the base delay
+  // directly, matching the "first attempt in a new regime uses the initial delay"
+  // invariant from the RETRY specification and the server-SDK implementation guide.
+  DefaultRetryDelayStrategy withResetCounter() {
+    return new DefaultRetryDelayStrategy(0, this.maxDelayMillis, this.backoffMultiplier, this.jitterMultiplier);
+  }
+
+  // Package-private helper used by EventSource.setMaxRetryDelayMillis. Returns a
+  // copy with a new max delay AND the exponent counter reset to 0. Preserves the
+  // backoff multiplier and jitter multiplier. Same reset-on-delay-change invariant
+  // as withResetCounter().
+  DefaultRetryDelayStrategy withMaxDelayMillisAndResetCounter(long newMaxDelayMillis) {
+    return new DefaultRetryDelayStrategy(0, newMaxDelayMillis, this.backoffMultiplier, this.jitterMultiplier);
+  }
   
   @Override
   public Result apply(long baseDelayMillis) {

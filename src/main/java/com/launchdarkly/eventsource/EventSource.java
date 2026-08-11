@@ -88,10 +88,17 @@ public class EventSource implements Closeable {
   // accessed from the thread that is reading from EventSource.
   private EventParser eventParser;
   ErrorStrategy currentErrorStrategy;
-  RetryDelayStrategy currentRetryDelayStrategy;
   private long connectedTime;
   private long disconnectedTime;
   private StreamEvent nextEvent;
+
+  // currentRetryDelayStrategy is volatile because it can be updated via the public
+  // setMaxRetryDelayMillis / setInitialRetryDelayMillis setters from any thread
+  // (e.g., an SDK error handler that runs on the reading thread, or a caller that
+  // wants to swap regimes from a different thread). Updates are always full-object
+  // replacements of the immutable strategy; volatile provides the necessary
+  // publication semantics.
+  volatile RetryDelayStrategy currentRetryDelayStrategy;
 
   // These fields are set by the thread that is reading the stream, but can
   // be modified from other threads if they call stop() or interrupt(). We
@@ -212,7 +219,84 @@ public class EventSource implements Closeable {
   public long getNextRetryDelayMillis() {
     return nextReconnectDelayMillis;
   }
-  
+
+  /**
+   * Updates the base retry delay used for computing subsequent reconnect delays.
+   * <p>
+   * This is the SDK-side entry point for RETRY-spec regime switching: for example,
+   * a data source that has classified a failure as "unexpected" per the RETRY
+   * specification and wants to transition into an extended-regime backoff calls
+   * this method with the extended-regime initial delay (e.g., 5 minutes).
+   * <p>
+   * Semantics match the SSE {@code retry:} field: the new value becomes the base
+   * used by the current {@link RetryDelayStrategy} on each subsequent {@code apply()}
+   * call, and the strategy's internal exponent counter is reset so the first
+   * subsequent reconnect uses the new base directly (rather than the new base
+   * multiplied by the current backoff exponent). If the current strategy is a
+   * {@link DefaultRetryDelayStrategy}, the counter reset preserves the strategy's
+   * max delay, backoff multiplier, and jitter multiplier. For any other custom
+   * {@link RetryDelayStrategy} implementation, only the base delay field is
+   * updated; the strategy's own state is left untouched (custom strategies can
+   * observe the new base via the {@code baseDelayMillis} argument to their
+   * {@code apply()} method).
+   * <p>
+   * This method is thread-safe.
+   *
+   * @param millis the new base retry delay in milliseconds
+   * @since 4.1.0
+   * @see #setMaxRetryDelayMillis(long)
+   * @see #getBaseRetryDelayMillis()
+   */
+  public void setInitialRetryDelayMillis(long millis) {
+    baseRetryDelayMillis = millis;
+    RetryDelayStrategy current = currentRetryDelayStrategy;
+    if (current instanceof DefaultRetryDelayStrategy) {
+      currentRetryDelayStrategy = ((DefaultRetryDelayStrategy) current).withResetCounter();
+    }
+    // For non-Default strategies we can't force a counter reset; the strategy's
+    // apply() will see the new baseDelayMillis on the next call and behave accordingly.
+  }
+
+  /**
+   * Updates the maximum retry delay used by the current retry delay strategy.
+   * <p>
+   * This is the SDK-side entry point for RETRY-spec regime switching: paired with
+   * {@link #setInitialRetryDelayMillis(long)}, a data source calls this method with
+   * the extended-regime maximum (e.g., 1 hour) when transitioning into the extended
+   * regime, and with the normal-regime maximum when transitioning back after a
+   * healthy-operation reset.
+   * <p>
+   * Internally: constructs a new {@link DefaultRetryDelayStrategy} instance with the
+   * given max delay and the exponent counter reset to 0, preserving the current
+   * backoff multiplier and jitter multiplier, and atomically swaps the reference.
+   * The counter reset ensures the first subsequent reconnect uses the current base
+   * delay directly rather than the base multiplied by the current backoff exponent
+   * (matching the "reset {@code n} when delays change" invariant from the RETRY
+   * specification's server-SDK implementation guide).
+   * <p>
+   * Currently only supported when the active strategy is a
+   * {@link DefaultRetryDelayStrategy} — the standard case for callers that
+   * configured retry via {@link Builder#retryDelay(long, TimeUnit)} or the
+   * default strategy. If the active strategy is a custom implementation, this
+   * method is a silent no-op (custom strategies define their own timing shape
+   * and don't expose a "max delay" concept via the abstract
+   * {@link RetryDelayStrategy} interface).
+   * <p>
+   * This method is thread-safe.
+   *
+   * @param millis the new max retry delay in milliseconds
+   * @since 4.1.0
+   * @see #setInitialRetryDelayMillis(long)
+   */
+  public void setMaxRetryDelayMillis(long millis) {
+    RetryDelayStrategy current = currentRetryDelayStrategy;
+    if (current instanceof DefaultRetryDelayStrategy) {
+      currentRetryDelayStrategy =
+          ((DefaultRetryDelayStrategy) current).withMaxDelayMillisAndResetCounter(millis);
+    }
+    // else: silent no-op for custom strategies (see Javadoc).
+  }
+
   /**
    * Attempts to start the stream if it is not already active.
    * <p>

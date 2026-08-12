@@ -100,6 +100,12 @@ public class EventSource implements Closeable {
   // publication semantics.
   volatile RetryDelayStrategy currentRetryDelayStrategy;
 
+  // Set to true by computeReconnectDelay() (following a fault), and cleared by
+  // tryStart() on successful reconnect. Used by setInitialRetryDelayMillis /
+  // setMaxRetryDelayMillis to know whether they should recompute the pending
+  // reconnect delay (SDK-driven mid-flight regime change).
+  private volatile boolean pendingReconnectWait = false;
+
   // These fields are set by the thread that is reading the stream, but can
   // be modified from other threads if they call stop() or interrupt(). We
   // use AtomicReference because we need atomicity in updates.
@@ -255,6 +261,11 @@ public class EventSource implements Closeable {
     }
     // For non-Default strategies we can't force a counter reset; the strategy's
     // apply() will see the new baseDelayMillis on the next call and behave accordingly.
+    // If a reconnect delay was already computed by the immediately-prior fault
+    // (which used the OLD strategy), recompute it now so the pending wait
+    // reflects the new regime. Without this, an SDK-driven regime transition
+    // from inside an error handler would take effect only on the NEXT fault.
+    recomputeNextReconnectDelayForRegimeSwitch();
   }
 
   /**
@@ -295,6 +306,30 @@ public class EventSource implements Closeable {
           ((DefaultRetryDelayStrategy) current).withMaxDelayMillisAndResetCounter(millis);
     }
     // else: silent no-op for custom strategies (see Javadoc).
+    // Same rationale as setInitialRetryDelayMillis: recompute the pending
+    // reconnect delay so an SDK-driven regime transition takes effect on the
+    // upcoming reconnect (not the NEXT fault's).
+    recomputeNextReconnectDelayForRegimeSwitch();
+  }
+
+  // Recompute nextReconnectDelayMillis using the current strategy + base delay.
+  // Called from the SDK-facing setters so a regime transition inside an error
+  // handler affects the pending reconnect wait, not just the one after. Only
+  // meaningful when a reconnect wait is pending (nextReconnectDelayMillis > 0).
+  // Deliberately does NOT advance the strategy: this recompute overwrites the
+  // just-computed delay from the fault-handling path; if we advanced the
+  // strategy here it would double-advance the counter for the next fault.
+  private void recomputeNextReconnectDelayForRegimeSwitch() {
+    // Only meaningful when we're in the between-fault-and-reconnect window.
+    if (!pendingReconnectWait) {
+      return;
+    }
+    RetryDelayStrategy.Result result = currentRetryDelayStrategy.apply(baseRetryDelayMillis);
+    nextReconnectDelayMillis = result.getDelayMillis();
+    // Intentionally do NOT assign result.getNext() to currentRetryDelayStrategy.
+    // The prior fault's computeReconnectDelay() already advanced the counter
+    // for the impending reconnect; our job here is just to overwrite the
+    // stored delay value with what it should have been under the new regime.
   }
 
   /**
@@ -405,6 +440,11 @@ public class EventSource implements Closeable {
       connectionCloser.set(clientResult.getCloser());
       origin = clientResult.getOrigin() == null ? client.getOrigin() : clientResult.getOrigin();
       connectedTime = System.currentTimeMillis();
+      // Clear the pending-reconnect flag now that the reconnect succeeded. The
+      // SDK-facing setInitialRetryDelayMillis / setMaxRetryDelayMillis methods
+      // use this flag to detect an in-flight reconnect wait and re-run the delay
+      // computation under a mid-flight regime change.
+      pendingReconnectWait = false;
       logger.debug("Connected to SSE stream");
 
       ResponseHeaders headers = clientResult.getHeaders();
@@ -749,6 +789,7 @@ public class EventSource implements Closeable {
     if (result.getNext() != null) {
       currentRetryDelayStrategy = result.getNext();
     }
+    pendingReconnectWait = true;
   }
 
   private boolean closeCurrentStream(boolean deliberatelyInterrupted, boolean shouldStopIterating) {

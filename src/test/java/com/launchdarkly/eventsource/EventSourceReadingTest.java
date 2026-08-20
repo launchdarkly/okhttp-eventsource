@@ -44,7 +44,8 @@ public class EventSourceReadingTest {
       assertThat(es.getState(), equalTo(ReadyState.RAW));
       assertThat(es.getOrigin(), equalTo(ORIGIN));
       assertThat(es.getLastEventId(), nullValue());
-      assertThat(es.getBaseRetryDelayMillis(), equalTo(EventSource.DEFAULT_RETRY_DELAY_MILLIS));
+      assertThat(((DefaultRetryDelayStrategy) es.defaultRetryDelayStrategy).baseDelayMillis,
+          equalTo(EventSource.DEFAULT_RETRY_DELAY_MILLIS));
     }
   }
   
@@ -59,7 +60,8 @@ public class EventSourceReadingTest {
       assertThat(es.getState(), equalTo(ReadyState.OPEN));
       assertThat(es.getOrigin(), equalTo(ORIGIN));
       assertThat(es.getLastEventId(), nullValue());
-      assertThat(es.getBaseRetryDelayMillis(), equalTo(EventSource.DEFAULT_RETRY_DELAY_MILLIS));
+      assertThat(((DefaultRetryDelayStrategy) es.defaultRetryDelayStrategy).baseDelayMillis,
+          equalTo(EventSource.DEFAULT_RETRY_DELAY_MILLIS));
     }
   }
 
@@ -218,7 +220,7 @@ public class EventSourceReadingTest {
     MockConnectStrategy mock = new MockConnectStrategy();
 
     try (EventSource es = baseBuilder(mock).retryDelay(6, TimeUnit.SECONDS).build()) {
-      assertEquals(6000, es.getBaseRetryDelayMillis());
+      assertEquals(6000, ((DefaultRetryDelayStrategy) es.defaultRetryDelayStrategy).baseDelayMillis);
     }
   }
 
@@ -243,7 +245,8 @@ public class EventSourceReadingTest {
       assertThat(es.readAnyEvent(), equalTo(
           new MessageEvent("message", eventData, null, ORIGIN)));
       
-      assertEquals(300, es.getBaseRetryDelayMillis());
+      // Wire retry hint updates the current active strategy's snapshot with the new base.
+      assertEquals(300, ((DefaultRetryDelayStrategy) es.currentRetryStrategySnapshot()).baseDelayMillis);
     }
   }
   

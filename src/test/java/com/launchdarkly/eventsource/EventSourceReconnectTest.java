@@ -100,29 +100,19 @@ public class EventSourceReconnectTest {
         respondWithDataAndThenEnd("data: first\n\n"),
         respondWithStream());
 
-    AtomicInteger counter = new AtomicInteger(0);
     long longDelay = 5000, tinyDelay = 1;
-    RetryDelayStrategy longDelayForFirstRetryOnly = new RetryDelayStrategy() {
-      @Override
-      public Result apply(long baseDelayMillis) {
-        return new Result(
-            counter.getAndIncrement() == 0 ? longDelay : tinyDelay,
-            null);
-      }
-    };
-    
+    RetryDelayStrategy longDelayForFirstRetryOnly = new TwoStageDelayStrategy(longDelay, tinyDelay);
+
     try (EventSource es = baseBuilder(mock)
         .retryDelayStrategy(longDelayForFirstRetryOnly)
         .build()) {
       assertThat(es.getState(), equalTo(ReadyState.RAW));
-      
+
       es.start();
-      
+
       assertThat(es.readAnyEvent(), equalTo(new MessageEvent("message", "first", null, ORIGIN)));
 
       assertThat(es.readAnyEvent(), equalTo(new FaultEvent(new StreamClosedByServerException())));
-
-      assertThat(es.getNextRetryDelayMillis(), equalTo(longDelay));
 
       long timeBeforeRetrying = System.currentTimeMillis();
       interruptOnAnotherThreadAfterDelay(es, 100);
@@ -140,16 +130,8 @@ public class EventSourceReconnectTest {
         respondWithDataAndThenEnd("data: first\n\n"),
         respondWithStream());
 
-    AtomicInteger counter = new AtomicInteger(0);
     long longDelay = 5000, tinyDelay = 1;
-    RetryDelayStrategy longDelayForFirstRetryOnly = new RetryDelayStrategy() {
-      @Override
-      public Result apply(long baseDelayMillis) {
-        return new Result(
-            counter.getAndIncrement() == 0 ? longDelay : tinyDelay,
-            null);
-      }
-    };
+    RetryDelayStrategy longDelayForFirstRetryOnly = new TwoStageDelayStrategy(longDelay, tinyDelay);
     
     try (EventSource es = baseBuilder(mock)
         .retryDelayStrategy(longDelayForFirstRetryOnly)
@@ -162,14 +144,41 @@ public class EventSourceReconnectTest {
 
       assertThat(es.readAnyEvent(), equalTo(new FaultEvent(new StreamClosedByServerException())));
 
-      assertThat(es.getNextRetryDelayMillis(), equalTo(longDelay));
-
       long timeBeforeRetrying = System.currentTimeMillis();
       interruptThisThreadFromAnotherThreadAfterDelay(100);
       es.start();
 
       long actualDuration = System.currentTimeMillis() - timeBeforeRetrying;
       assertThat(actualDuration, Matchers.lessThan(longDelay));
+    }
+  }
+
+  // Test strategy that returns one delay on the first attempt and a different
+  // delay for all subsequent attempts. Immutable — the "first vs subsequent"
+  // distinction is captured by two chained snapshots.
+  private static final class TwoStageDelayStrategy extends RetryDelayStrategy {
+    private final long firstDelay;
+    private final long subsequentDelay;
+    private final boolean isFirst;
+
+    TwoStageDelayStrategy(long firstDelay, long subsequentDelay) {
+      this(firstDelay, subsequentDelay, true);
+    }
+
+    private TwoStageDelayStrategy(long firstDelay, long subsequentDelay, boolean isFirst) {
+      this.firstDelay = firstDelay;
+      this.subsequentDelay = subsequentDelay;
+      this.isFirst = isFirst;
+    }
+
+    @Override
+    public long getDelayMillis() {
+      return isFirst ? firstDelay : subsequentDelay;
+    }
+
+    @Override
+    public RetryDelayStrategy getNext() {
+      return new TwoStageDelayStrategy(firstDelay, subsequentDelay, false);
     }
   }
 }

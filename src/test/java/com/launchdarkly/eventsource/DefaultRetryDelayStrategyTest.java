@@ -17,23 +17,23 @@ public class DefaultRetryDelayStrategyTest {
     long base = 4;
 
     RetryDelayStrategy s = RetryDelayStrategy.defaultStrategy()
+        .initialDelay(base, TimeUnit.MILLISECONDS)
         .backoffMultiplier(2).jitterMultiplier(0)
         .maxDelay(0, null);
 
-    RetryDelayStrategy.Result r1 = s.apply(base);
-    assertThat(r1.getDelayMillis(), equalTo(base));
-    
-    RetryDelayStrategy.Result r2 = r1.getNext().apply(base);
-    assertThat(r2.getDelayMillis(), equalTo(base * 2));
-    
-    RetryDelayStrategy.Result r3 = r2.getNext().apply(base);
-    assertThat(r3.getDelayMillis(), equalTo(base * 4));
-    
-    RetryDelayStrategy.Result r4 = r3.getNext().apply(base);
-    assertThat(r4.getDelayMillis(), equalTo(base * 8));
-    
-    RetryDelayStrategy.Result r5 = r4.getNext().apply(base);
-    assertThat(r5.getDelayMillis(), equalTo(base * 16));
+    assertThat(s.getDelayMillis(), equalTo(base));
+
+    s = s.getNext();
+    assertThat(s.getDelayMillis(), equalTo(base * 2));
+
+    s = s.getNext();
+    assertThat(s.getDelayMillis(), equalTo(base * 4));
+
+    s = s.getNext();
+    assertThat(s.getDelayMillis(), equalTo(base * 8));
+
+    s = s.getNext();
+    assertThat(s.getDelayMillis(), equalTo(base * 16));
   }
 
   @Test
@@ -42,38 +42,36 @@ public class DefaultRetryDelayStrategyTest {
     long max = base * 4 + 3;
 
     RetryDelayStrategy s = RetryDelayStrategy.defaultStrategy()
+        .initialDelay(base, TimeUnit.MILLISECONDS)
         .backoffMultiplier(2).jitterMultiplier(0)
         .maxDelay(max, TimeUnit.MILLISECONDS);
 
-    RetryDelayStrategy.Result r1 = s.apply(base);
-    assertThat(r1.getDelayMillis(), equalTo(base));
-    
-    RetryDelayStrategy.Result r2 = r1.getNext().apply(base);
-    assertThat(r2.getDelayMillis(), equalTo(base * 2));
-    
-    RetryDelayStrategy.Result r3 = r2.getNext().apply(base);
-    assertThat(r3.getDelayMillis(), equalTo(base * 4));
-    
-    RetryDelayStrategy.Result r4 = r3.getNext().apply(base);
-    assertThat(r4.getDelayMillis(), equalTo(max));
+    assertThat(s.getDelayMillis(), equalTo(base));
+
+    s = s.getNext();
+    assertThat(s.getDelayMillis(), equalTo(base * 2));
+
+    s = s.getNext();
+    assertThat(s.getDelayMillis(), equalTo(base * 4));
+
+    s = s.getNext();
+    assertThat(s.getDelayMillis(), equalTo(max));
   }
-  
+
   @Test
   public void noBackoffAndNoJitter() {
     long base = 4;
 
     RetryDelayStrategy s = RetryDelayStrategy.defaultStrategy()
+        .initialDelay(base, TimeUnit.MILLISECONDS)
         .backoffMultiplier(1).jitterMultiplier(0)
         .maxDelay(0, null);
 
-    RetryDelayStrategy.Result r1 = s.apply(base);
-    assertThat(r1.getDelayMillis(), equalTo(base));
-    
-    RetryDelayStrategy.Result r2 = r1.getNext().apply(base);
-    assertThat(r2.getDelayMillis(), equalTo(base));
-    
-    RetryDelayStrategy.Result r3 = r2.getNext().apply(base);
-    assertThat(r3.getDelayMillis(), equalTo(base));
+    assertThat(s.getDelayMillis(), equalTo(base));
+    s = s.getNext();
+    assertThat(s.getDelayMillis(), equalTo(base));
+    s = s.getNext();
+    assertThat(s.getDelayMillis(), equalTo(base));
   }
 
   @Test
@@ -84,69 +82,99 @@ public class DefaultRetryDelayStrategyTest {
     float specifiedJitter = 0.25f;
 
     RetryDelayStrategy s = RetryDelayStrategy.defaultStrategy()
+        .initialDelay(base, TimeUnit.MILLISECONDS)
         .backoffMultiplier(specifiedBackoff).jitterMultiplier(specifiedJitter)
         .maxDelay(max, TimeUnit.MILLISECONDS);
-    
-    RetryDelayStrategy.Result r1 =
-        verifyJitter(s, base, base, specifiedJitter);
-    
-    RetryDelayStrategy.Result r2 =
-        verifyJitter(r1.getNext(), base, base * specifiedBackoff, specifiedJitter);
 
-    RetryDelayStrategy.Result r3 =
-        verifyJitter(r2.getNext(), base, base * specifiedBackoff * specifiedBackoff, specifiedJitter);
-
-    verifyJitter(r3.getNext(), base, max, specifiedJitter);
+    s = verifyJitter(s, base, specifiedJitter);
+    s = verifyJitter(s, base * specifiedBackoff, specifiedJitter);
+    s = verifyJitter(s, base * specifiedBackoff * specifiedBackoff, specifiedJitter);
+    verifyJitter(s, max, specifiedJitter);
   }
 
   @Test
   public void zeroBaseDelayAlwaysProducesZero() {
-    RetryDelayStrategy s = RetryDelayStrategy.defaultStrategy();
+    RetryDelayStrategy s = RetryDelayStrategy.defaultStrategy()
+        .initialDelay(0, TimeUnit.MILLISECONDS);
 
     for (int i = 0; i < 5; i++) {
-      RetryDelayStrategy.Result r = s.apply(0);
-      assertThat(r.getDelayMillis(), equalTo(0L));
-      s = r.getNext();
+      assertThat(s.getDelayMillis(), equalTo(0L));
+      s = s.getNext();
     }
   }
-  
-  private RetryDelayStrategy.Result verifyJitter(
+
+  @Test
+  public void withBaseDelayMillisOverridesAndResetsProgression() {
+    long initialBase = 100;
+    long overrideBase = 500;
+
+    RetryDelayStrategy s = RetryDelayStrategy.defaultStrategy()
+        .initialDelay(initialBase, TimeUnit.MILLISECONDS)
+        .backoffMultiplier(2).jitterMultiplier(0)
+        .maxDelay(0, null);
+
+    // Advance a few steps.
+    s = s.getNext();
+    s = s.getNext();
+    // Now at 400 (100 * 2 * 2).
+    assertThat(s.getDelayMillis(), equalTo(initialBase * 4));
+
+    // Override the base; expect a fresh snapshot at the new base.
+    s = s.withBaseDelayMillis(overrideBase);
+    assertThat(s.getDelayMillis(), equalTo(overrideBase));
+
+    // Advance from the fresh snapshot.
+    s = s.getNext();
+    assertThat(s.getDelayMillis(), equalTo(overrideBase * 2));
+  }
+
+  // Verifies that a strategy's getDelayMillis() sits in the expected jitter range
+  // around baseWithBackoff, and returns the getNext() strategy for chained
+  // verification. Because each snapshot's jitter is rolled once at construction
+  // (deterministic per instance), we sample 100 fresh withBaseDelayMillis
+  // reconstructions to confirm the range and that the values aren't all identical.
+  private RetryDelayStrategy verifyJitter(
       RetryDelayStrategy s,
-      long base,
       long baseWithBackoff,
       float expectedJitterRatio
       ) {
-    // We can't 100% prove that it's using the expected jitter ratio, since the result
-    // is pseudo-random, but we can at least prove that repeated computations don't
-    // fall outside the expected range and aren't all equal.
-    RetryDelayStrategy.Result lastResult = null;
+    long firstDelay = s.getDelayMillis();
+    assertThat(firstDelay, allOf(
+        greaterThanOrEqualTo((long)(baseWithBackoff * expectedJitterRatio)),
+        lessThanOrEqualTo(baseWithBackoff)
+    ));
+
+    // Sample additional jittered values via withBaseDelayMillis() (each call
+    // reconstructs with a fresh jitter roll).
     boolean atLeastOneWasDifferent = false;
     for (int i = 0; i < 100; i++) {
-      RetryDelayStrategy.Result result = s.apply(base);
-      assertThat(result.getDelayMillis(), allOf(
+      RetryDelayStrategy sampled = s.withBaseDelayMillis(baseWithBackoff);
+      long delay = sampled.getDelayMillis();
+      assertThat(delay, allOf(
           greaterThanOrEqualTo((long)(baseWithBackoff * expectedJitterRatio)),
           lessThanOrEqualTo(baseWithBackoff)
-          ));
-      if (lastResult != null && !atLeastOneWasDifferent) {
-        atLeastOneWasDifferent = result.getDelayMillis() != lastResult.getDelayMillis();
+      ));
+      if (delay != firstDelay) {
+        atLeastOneWasDifferent = true;
       }
-      lastResult = result;
     }
-    return lastResult;
+    // (Not asserting atLeastOneWasDifferent strictly to avoid flakes on very small
+    // baseWithBackoff values, but it should virtually always be true.)
+    return s.getNext();
   }
-  
+
   @Test
   public void defaultBackoff() {
     long base = 4;
 
     RetryDelayStrategy s = RetryDelayStrategy.defaultStrategy()
+        .initialDelay(base, TimeUnit.MILLISECONDS)
         .jitterMultiplier(0).maxDelay(100, TimeUnit.SECONDS);
-    
-    RetryDelayStrategy.Result r1 = s.apply(base);
-    assertThat(r1.getDelayMillis(), equalTo(base));
-    
-    RetryDelayStrategy.Result r2 = r1.getNext().apply(base);
-    assertThat(r2.getDelayMillis(), equalTo((long)
+
+    assertThat(s.getDelayMillis(), equalTo(base));
+
+    s = s.getNext();
+    assertThat(s.getDelayMillis(), equalTo((long)
         (base * DefaultRetryDelayStrategy.DEFAULT_BACKOFF_MULTIPLIER)));
   }
 
@@ -155,8 +183,20 @@ public class DefaultRetryDelayStrategyTest {
     long base = 4;
 
     RetryDelayStrategy s = RetryDelayStrategy.defaultStrategy()
+        .initialDelay(base, TimeUnit.MILLISECONDS)
         .maxDelay(100, TimeUnit.SECONDS);
-    
-    verifyJitter(s, base, base, DefaultRetryDelayStrategy.DEFAULT_JITTER_MULTIPLIER);
+
+    verifyJitter(s, base, DefaultRetryDelayStrategy.DEFAULT_JITTER_MULTIPLIER);
+  }
+
+  @Test
+  public void tinyBaseWithSmallJitterProducesNoJitter() {
+    // When base * jitterMultiplier rounds below 1, jitter is effectively disabled
+    // (the jitter subtraction would be zero). Verify this edge is handled without
+    // throwing (SecureRandom.nextInt(0) would throw IllegalArgumentException).
+    RetryDelayStrategy s = RetryDelayStrategy.defaultStrategy()
+        .initialDelay(1, TimeUnit.MILLISECONDS)
+        .jitterMultiplier(0.4f);
+    assertThat(s.getDelayMillis(), equalTo(1L));
   }
 }

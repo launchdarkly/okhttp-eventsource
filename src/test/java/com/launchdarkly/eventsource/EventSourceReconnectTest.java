@@ -4,6 +4,7 @@ import org.hamcrest.Matchers;
 import org.junit.Rule;
 import org.junit.Test;
 
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.launchdarkly.eventsource.MockConnectStrategy.ORIGIN;
@@ -28,7 +29,6 @@ public class EventSourceReconnectTest {
   private EventSource.Builder baseBuilder(MockConnectStrategy mock) {
     return new EventSource.Builder(mock)
         .errorStrategy(ErrorStrategy.alwaysContinue())
-        .retryDelay(BRIEF_DELAY, null)
         .logger(testLogger.getLogger());
   }
   
@@ -41,15 +41,17 @@ public class EventSourceReconnectTest {
         respondWithDataAndThenEnd(message1),
         respondWithDataAndThenStayOpen(message2));
 
-    try (EventSource es = baseBuilder(mock).build()) {
+    try (EventSource es = baseBuilder(mock)
+        .retryDelayStrategy(RetryDelayStrategy.defaultStrategy().initialDelay(BRIEF_DELAY, TimeUnit.MILLISECONDS))
+        .build()) {
       assertThat(es.getState(), equalTo(ReadyState.RAW));
 
       es.start();
-      
+
       assertThat(es.getState(), equalTo(ReadyState.OPEN));
 
       assertThat(es.readAnyEvent(), equalTo(new MessageEvent("message", "first", null, ORIGIN)));
-      
+
       assertThat(es.readAnyEvent(), equalTo(new FaultEvent(new StreamClosedByServerException())));
 
       assertThat(es.getState(), equalTo(ReadyState.CLOSED));
@@ -70,15 +72,17 @@ public class EventSourceReconnectTest {
     mock.configureRequests(respondWithDataAndThenStayOpen(message1),
         respondWithDataAndThenStayOpen(message2));
 
-    try (EventSource es = baseBuilder(mock).build()) {
+    try (EventSource es = baseBuilder(mock)
+        .retryDelayStrategy(RetryDelayStrategy.defaultStrategy().initialDelay(BRIEF_DELAY, TimeUnit.MILLISECONDS))
+        .build()) {
       assertThat(es.getState(), equalTo(ReadyState.RAW));
-      
+
       es.start();
 
       assertThat(es.getState(), equalTo(ReadyState.OPEN));
-      
+
       assertThat(es.readAnyEvent(), equalTo(new MessageEvent("message", "first", null, ORIGIN)));
-      
+
       interruptOnAnotherThread(es);
       
       assertThat(es.readAnyEvent(), equalTo(new FaultEvent(new StreamClosedByCallerException())));

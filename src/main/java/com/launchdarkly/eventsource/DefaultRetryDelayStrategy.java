@@ -124,14 +124,16 @@ public class DefaultRetryDelayStrategy extends RetryDelayStrategy {
       float backoffMultiplier,
       float jitterMultiplier
       ) {
-    this.baseDelayMillis = baseDelayMillis;
+    this.baseDelayMillis = maxDelayMillis > 0 && baseDelayMillis > maxDelayMillis
+        ? maxDelayMillis
+        : baseDelayMillis;
     this.maxDelayMillis = maxDelayMillis;
     this.backoffMultiplier = backoffMultiplier;
     this.jitterMultiplier = jitterMultiplier;
-    long adjustedDelay = baseDelayMillis;
-    if (jitterMultiplier > 0 && baseDelayMillis > 0) {
+    long adjustedDelay = this.baseDelayMillis;
+    if (jitterMultiplier > 0 && this.baseDelayMillis > 0) {
       // 2^31 milliseconds is much longer than any reconnect time we would reasonably want to use, so we can pin this to int
-      int maxTimeInt = baseDelayMillis > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int)baseDelayMillis;
+      int maxTimeInt = this.baseDelayMillis > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int)this.baseDelayMillis;
       int jitterRange = Math.round(maxTimeInt * jitterMultiplier);
       if (jitterRange > 0) {
         adjustedDelay -= ThreadLocalRandom.current().nextInt(jitterRange);

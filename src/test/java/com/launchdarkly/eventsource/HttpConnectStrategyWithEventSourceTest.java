@@ -9,6 +9,8 @@ import org.junit.Test;
 
 import org.hamcrest.Matchers;
 
+import java.util.concurrent.TimeUnit;
+
 import static com.launchdarkly.eventsource.TestUtils.interruptOnAnotherThread;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
@@ -104,7 +106,7 @@ public class HttpConnectStrategyWithEventSourceTest {
     try (HttpServer server = HttpServer.start(allResponses)) {
       try (EventSource es = new EventSource.Builder(server.getUri())
           .errorStrategy(ErrorStrategy.alwaysContinue())
-          .retryDelay(1, null)
+          .retryDelayStrategy(RetryDelayStrategy.defaultStrategy().initialDelay(1, TimeUnit.MILLISECONDS))
           .build()) {
         es.start();
         
@@ -136,7 +138,7 @@ public class HttpConnectStrategyWithEventSourceTest {
     try (HttpServer server = HttpServer.start(allResponses)) {
       try (EventSource es = new EventSource.Builder(server.getUri())
           .errorStrategy(ErrorStrategy.alwaysContinue())
-          .retryDelay(1, null)
+          .retryDelayStrategy(RetryDelayStrategy.defaultStrategy().initialDelay(1, TimeUnit.MILLISECONDS))
           .build()) {
         es.start();
         
@@ -237,7 +239,7 @@ public class HttpConnectStrategyWithEventSourceTest {
     try (HttpServer server = HttpServer.start(allResponses)) {
       try (EventSource es = new EventSource.Builder(server.getUri())
           .errorStrategy(ErrorStrategy.alwaysContinue())
-          .retryDelay(1, null)
+          .retryDelayStrategy(RetryDelayStrategy.defaultStrategy().initialDelay(1, TimeUnit.MILLISECONDS))
           .build()) {
         es.start();
 

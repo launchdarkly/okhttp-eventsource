@@ -35,9 +35,10 @@ public abstract class RetryDelayStrategy {
    * <p>
    * Strategies that never advance (e.g., a constant-delay strategy) return
    * {@code this}. Strategies with backoff progression return a new instance
-   * carrying the advanced state.
+   * carrying the advanced state. Returning {@code null} is treated as
+   * equivalent to returning {@code this}.
    *
-   * @return the strategy to use next
+   * @return the strategy to use next, or {@code null} to reuse this instance
    * @since 5.0.0
    */
   public abstract RetryDelayStrategy getNext();

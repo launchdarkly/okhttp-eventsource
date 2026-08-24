@@ -7,6 +7,8 @@ import com.launchdarkly.logging.LogCapture;
 import org.junit.Rule;
 import org.junit.Test;
 
+import java.util.concurrent.TimeUnit;
+
 import static com.launchdarkly.eventsource.MockConnectStrategy.ORIGIN;
 import static com.launchdarkly.eventsource.MockConnectStrategy.respondWithDataAndThenEnd;
 import static com.launchdarkly.eventsource.MockConnectStrategy.respondWithStream;
@@ -15,6 +17,7 @@ import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.startsWith;
+import static org.junit.Assert.assertEquals;
 
 /**
  * These tests verify that EventSource interacts with the configured RetryDelayStrategy
@@ -32,7 +35,6 @@ public class EventSourceRetryDelayStrategyUsageTest {
   private EventSource.Builder baseBuilder(MockConnectStrategy mock) {
     return new EventSource.Builder(mock)
         .errorStrategy(ErrorStrategy.alwaysContinue())
-        .retryDelay(BRIEF_DELAY, null)
         .logger(testLogger.getLogger());
   }
   
@@ -269,8 +271,6 @@ public class EventSourceRetryDelayStrategyUsageTest {
 
     long initialDelay = 10;
     int normalIncrement = 3, extendedIncrement = 100;
-    // Bake initial into each strategy explicitly, since Builder.retryDelay(x) applies
-    // only to the default strategy (via withBaseDelayMillis at build time).
     RetryDelayStrategy normal = new FixedRetryDelayStrategy(initialDelay, normalIncrement);
     RetryDelayStrategy extended = new FixedRetryDelayStrategy(initialDelay, extendedIncrement);
     try (EventSource es = baseBuilder(mock)
@@ -388,6 +388,130 @@ public class EventSourceRetryDelayStrategyUsageTest {
       assertThat(es.readAnyEvent(), equalTo(new StartedEvent()));
       // Normal resumes at counter=1: delay = initialDelay + 1 * normalIncrement.
       assertThat(readReconnectDelayFromLog(), equalTo(initialDelay + normalIncrement));
+    }
+  }
+
+  @Test
+  public void wireRetryHintAppliesToAllRegisteredStrategies() throws Exception {
+    // A server-directed retry hint received via the SSE "retry:" field is
+    // applied to every registered strategy's snapshot, not just the currently-
+    // active one. Verifies the "sticky-to-all" behavior called out in the PR
+    // description (and matching Go's ApplyRetryTime).
+    MockConnectStrategy mock = new MockConnectStrategy();
+    PipedStreamRequestHandler stream = respondWithStream();
+    mock.configureRequests(stream);
+    stream.provideData("retry: 500\n\ndata: x\n\n");
+
+    DefaultRetryDelayStrategy normal = RetryDelayStrategy.defaultStrategy()
+        .initialDelay(1000, TimeUnit.MILLISECONDS)
+        .jitterMultiplier(0);
+    DefaultRetryDelayStrategy extended = RetryDelayStrategy.defaultStrategy()
+        .initialDelay(60_000, TimeUnit.MILLISECONDS)
+        .jitterMultiplier(0);
+
+    try (EventSource es = baseBuilder(mock)
+        .retryDelayStrategy(normal)      // default (active)
+        .retryDelayStrategy(extended)    // additional
+        .build()) {
+      es.start();
+      assertThat(es.readAnyEvent(), equalTo(new MessageEvent("message", "x", null, ORIGIN)));
+
+      // Normal is the active strategy; its snapshot should reflect the wire hint.
+      assertEquals(500L,
+          ((DefaultRetryDelayStrategy) es.currentRetryStrategySnapshot()).baseDelayMillis);
+
+      // Extended was not active when the hint arrived, but the hint stampeded
+      // across every registered strategy's reset instance. Activate to peek.
+      es.activateRetryDelayStrategy(extended);
+      assertEquals(500L,
+          ((DefaultRetryDelayStrategy) es.currentRetryStrategySnapshot()).baseDelayMillis);
+    }
+  }
+
+  @Test
+  public void wireRetryHintIsStickyAcrossHealthyOpReset() throws Exception {
+    // A wire hint received on connection N stays sticky when a later healthy-op
+    // reset fires: the reset re-instantiates each registered strategy against
+    // the wire base, not the caller's originally-registered base. Verifies the
+    // WHATWG-sticky claim in the PR description.
+    MockConnectStrategy mock = new MockConnectStrategy();
+    PipedStreamRequestHandler stream1 = respondWithStream();
+    PipedStreamRequestHandler stream2 = respondWithStream();
+    mock.configureRequests(stream1, stream2);
+    stream1.provideData("retry: 500\n\ndata: x\n\n");
+
+    long threshold = 50;
+    // backoffMultiplier(1) keeps base flat across getNext() so the assertion
+    // reads the pure post-reset base.
+    DefaultRetryDelayStrategy normal = RetryDelayStrategy.defaultStrategy()
+        .initialDelay(1000, TimeUnit.MILLISECONDS)
+        .jitterMultiplier(0)
+        .backoffMultiplier(1);
+
+    try (EventSource es = baseBuilder(mock)
+        .retryDelayStrategy(normal)
+        .retryDelayResetThreshold(threshold, null)
+        .build()) {
+      es.start();
+      assertThat(es.readAnyEvent(), equalTo(new MessageEvent("message", "x", null, ORIGIN)));
+
+      // Let the connection live past the reset threshold, then fault it. The
+      // healthy-op reset should fire in computeReconnectDelay and re-apply the
+      // wire hint (500), not revert to the caller's original base (1000).
+      Thread.sleep(threshold + 10);
+      stream1.close();
+      assertThat(es.readAnyEvent(), equalTo(new FaultEvent(new StreamClosedByServerException())));
+      assertThat(es.readAnyEvent(), equalTo(new StartedEvent()));
+      assertThat(readReconnectDelayFromLog(), equalTo(500L));
+    }
+  }
+
+  @Test
+  public void healthyOpResetIgnoresConsumerProcessingDelay() throws Exception {
+    // computeReconnectDelay runs at sleep-time (after the consumer has been
+    // handed a FaultEvent and looped back to readAnyEvent). The healthy-op
+    // threshold check must measure only the prior connection's duration
+    // (disconnectedTime - connectedTime), NOT (now - connectedTime), or a
+    // slow consumer can spuriously trip the reset for a connection that
+    // was actually short.
+    MockConnectStrategy mock = new MockConnectStrategy();
+    PipedStreamRequestHandler stream1 = respondWithStream();
+    PipedStreamRequestHandler stream2 = respondWithStream();
+    PipedStreamRequestHandler stream3 = respondWithStream();
+    mock.configureRequests(stream1, stream2, stream3);
+
+    long threshold = 200;
+    long initialDelay = 100;
+    DefaultRetryDelayStrategy strat = RetryDelayStrategy.defaultStrategy()
+        .initialDelay(initialDelay, TimeUnit.MILLISECONDS)
+        .jitterMultiplier(0);   // backoffMultiplier default 2
+
+    try (EventSource es = baseBuilder(mock)
+        .retryDelayStrategy(strat)
+        .retryDelayResetThreshold(threshold, TimeUnit.MILLISECONDS)
+        .build()) {
+      es.start();
+
+      // Fault 1: brief connection, well below threshold. Delay = initialDelay.
+      stream1.close();
+      assertThat(es.readAnyEvent(), equalTo(new FaultEvent(new StreamClosedByServerException())));
+      assertThat(es.readAnyEvent(), equalTo(new StartedEvent()));
+      assertThat(readReconnectDelayFromLog(), equalTo(initialDelay));
+
+      // Fault 2: same brief connection, but the consumer takes a long time
+      // between reading the FaultEvent and readAnyEvent'ing again -- long
+      // enough that (now - connectedTime) crosses the threshold even though
+      // the connection itself did not.
+      stream2.close();
+      assertThat(es.readAnyEvent(), equalTo(new FaultEvent(new StreamClosedByServerException())));
+      Thread.sleep(threshold + 100);
+      assertThat(es.readAnyEvent(), equalTo(new StartedEvent()));
+
+      // Correct behavior: no reset (actual connection duration << threshold),
+      // so the strategy's counter advances and delay is initialDelay * 2.
+      // Bug (pre-fix): reset fires because now - connectedTime >= threshold,
+      // giving delay = initialDelay again.
+      assertThat(readReconnectDelayFromLog(), equalTo(initialDelay * 2));
     }
   }
 }

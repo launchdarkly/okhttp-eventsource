@@ -4,6 +4,7 @@ import com.launchdarkly.eventsource.EventSource;
 import com.launchdarkly.eventsource.MessageEvent;
 import com.launchdarkly.eventsource.MockConnectStrategy;
 import com.launchdarkly.eventsource.ReadyState;
+import com.launchdarkly.eventsource.RetryDelayStrategy;
 import com.launchdarkly.eventsource.StreamClosedByServerException;
 import com.launchdarkly.eventsource.StreamException;
 import com.launchdarkly.eventsource.StreamHttpErrorException;
@@ -40,7 +41,7 @@ public class BackgroundEventSourceErrorHandlingTest {
   
   private EventSource.Builder baseEventSourceBuilder() {
     return new EventSource.Builder(mockConnect)
-        .retryDelay(1, null)
+        .retryDelayStrategy(RetryDelayStrategy.defaultStrategy().initialDelay(1, TimeUnit.MILLISECONDS))
         .logger(testLogger.getLogger());
   }
   

@@ -7,6 +7,7 @@ import org.junit.Rule;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 
 import static com.launchdarkly.eventsource.MockConnectStrategy.rejectConnection;
 import static com.launchdarkly.eventsource.MockConnectStrategy.respondWithDataAndThenStayOpen;
@@ -30,7 +31,7 @@ public class EventSourceErrorStrategyUsageTest {
 
   private EventSource.Builder baseBuilder(MockConnectStrategy mock) {
     return new EventSource.Builder(mock)
-        .retryDelay(1, null)
+        .retryDelayStrategy(RetryDelayStrategy.defaultStrategy().initialDelay(1, TimeUnit.MILLISECONDS))
         .logger(testLogger.getLogger());
   }
   

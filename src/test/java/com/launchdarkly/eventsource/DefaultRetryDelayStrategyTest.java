@@ -199,4 +199,36 @@ public class DefaultRetryDelayStrategyTest {
         .jitterMultiplier(0.4f);
     assertThat(s.getDelayMillis(), equalTo(1L));
   }
+
+  @Test
+  public void initialDelayAboveMaxDelayIsClamped() {
+    // The pre-PR apply(base) path pinned every attempt (including the first)
+    // against maxDelay. Post-PR, the max is enforced only in getNext(), so
+    // an initialDelay above maxDelay must still be clamped at construction
+    // for parity.
+    long max = 30_000;
+    RetryDelayStrategy s = RetryDelayStrategy.defaultStrategy()
+        .initialDelay(1, TimeUnit.HOURS)
+        .backoffMultiplier(2).jitterMultiplier(0)
+        .maxDelay(max, TimeUnit.MILLISECONDS);
+
+    assertThat(s.getDelayMillis(), equalTo(max));
+    // Subsequent progression stays pinned.
+    assertThat(s.getNext().getDelayMillis(), equalTo(max));
+  }
+
+  @Test
+  public void withBaseDelayMillisAboveMaxDelayIsClamped() {
+    // A wire retry hint whose value exceeds the strategy's maxDelay must not
+    // bypass the max on the immediate reconnect. withBaseDelayMillis is the
+    // entry point for wire hints via EventSource.resetAllRegisteredStrategyState.
+    long max = 30_000;
+    RetryDelayStrategy s = RetryDelayStrategy.defaultStrategy()
+        .initialDelay(1, TimeUnit.SECONDS)
+        .backoffMultiplier(2).jitterMultiplier(0)
+        .maxDelay(max, TimeUnit.MILLISECONDS)
+        .withBaseDelayMillis(60_000);
+
+    assertThat(s.getDelayMillis(), equalTo(max));
+  }
 }

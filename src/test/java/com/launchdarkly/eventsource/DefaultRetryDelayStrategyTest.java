@@ -231,4 +231,23 @@ public class DefaultRetryDelayStrategyTest {
 
     assertThat(s.getDelayMillis(), equalTo(max));
   }
+
+  @Test
+  public void initialDelayIsPreservedWhenMaxDelayRaisedLater() {
+    // Reproduces the extended-regime configuration pattern from the PR
+    // description:
+    //     .initialDelay(5, MINUTES).maxDelay(1, HOURS)
+    // The initialDelay call runs against defaultStrategy()'s current
+    // DEFAULT_MAX_DELAY_MILLIS (30 s) and would clamp base to 30 s if the
+    // constructor clamped baseDelayMillis eagerly. The subsequent maxDelay
+    // call raises the ceiling to 1 hour, so the caller's 5-minute base must
+    // survive to the final instance.
+    long expectedBase = 5 * 60 * 1000;
+    RetryDelayStrategy s = RetryDelayStrategy.defaultStrategy()
+        .initialDelay(5, TimeUnit.MINUTES)
+        .maxDelay(1, TimeUnit.HOURS)
+        .backoffMultiplier(2).jitterMultiplier(0);
+
+    assertThat(s.getDelayMillis(), equalTo(expectedBase));
+  }
 }

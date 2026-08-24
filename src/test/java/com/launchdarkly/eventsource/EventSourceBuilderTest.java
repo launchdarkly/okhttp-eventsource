@@ -92,6 +92,11 @@ public class EventSourceBuilderTest {
       assertThat(es.currentRetryDelayStrategy, sameInstance(customStrategy));
     }
   }
+
+  @Test(expected=IllegalArgumentException.class)
+  public void retryDelayStrategyRejectsNull() {
+    builder.retryDelayStrategy(null);
+  }
   
   @Test
   public void retryDelayResetThreshold() {

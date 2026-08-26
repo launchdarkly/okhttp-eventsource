@@ -63,7 +63,7 @@ java {
 
 object Versions {
     const val launchdarklyLogging = "1.1.1"
-    const val okhttp = "4.12.0"
+    const val okhttp = "5.3.2"
 }
 
 dependencies {

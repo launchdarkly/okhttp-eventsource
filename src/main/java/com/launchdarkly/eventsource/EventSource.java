@@ -7,8 +7,12 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -59,7 +63,8 @@ public class EventSource implements Closeable {
   private final LDLogger logger;
 
   /**
-   * The default value for {@link Builder#retryDelay(long, TimeUnit)}: 1 second.
+   * The default base retry delay, in milliseconds, used by
+   * {@link RetryDelayStrategy#defaultStrategy()}: 1 second.
    */
   public static final long DEFAULT_RETRY_DELAY_MILLIS = 1000;
   /**
@@ -70,28 +75,36 @@ public class EventSource implements Closeable {
    * The default value for {@link Builder#readBufferSize(int)}.
    */
   public static final int DEFAULT_READ_BUFFER_SIZE = 1000;
-  
+  /**
+   * Upper bound applied to a server-directed retry received via the SSE
+   * {@code retry:} field: 1 hour.
+   */
+  public static final long MAX_SERVER_DIRECTED_RETRY_DELAY_MILLIS = 3_600_000L;
+
   // Note that some fields have package-private visibility for tests.
-  
+
   private final Object sleepNotifier = new Object();
-  
+
   // The following final fields are set from the configuration builder.
   private final ConnectStrategy.Client client;
   final int readBufferSize;
   final ErrorStrategy baseErrorStrategy;
-  final RetryDelayStrategy baseRetryDelayStrategy;
   final long retryDelayResetThresholdMillis;
   final boolean streamEventData;
   final Set<String> expectFields;
-  
+
   // The following mutable fields are not volatile because they should only be
   // accessed from the thread that is reading from EventSource.
   private EventParser eventParser;
   ErrorStrategy currentErrorStrategy;
-  RetryDelayStrategy currentRetryDelayStrategy;
   private long connectedTime;
   private long disconnectedTime;
   private StreamEvent nextEvent;
+
+  private final Map<RetryDelayStrategy, RetryDelayStrategy> registeredStrategiesState;
+  final RetryDelayStrategy defaultRetryDelayStrategy;
+  volatile RetryDelayStrategy currentRetryDelayStrategy;
+  private volatile Long serverDirectedInitialDelayMillis = null;
 
   // These fields are set by the thread that is reading the stream, but can
   // be modified from other threads if they call stop() or interrupt(). We
@@ -104,13 +117,9 @@ public class EventSource implements Closeable {
   // and are read by the thread that is reading the stream.
   private volatile boolean deliberatelyClosedConnection;
   private volatile boolean calledStop;
-  
-  // These fields are written by the thread that is reading the stream, and can
-  // be read by other threads to inspect the state of the stream.
-  volatile long baseRetryDelayMillis; // set at config time but may be changed by a "retry:" value
+
   private volatile String lastEventId;
   private volatile URI origin;
-  private volatile long nextReconnectDelayMillis;
 
   EventSource(Builder builder) {
     this.logger = builder.logger == null ? LDLogger.none() : builder.logger;
@@ -119,10 +128,20 @@ public class EventSource implements Closeable {
     this.lastEventId = builder.lastEventId;
     this.baseErrorStrategy = this.currentErrorStrategy =
         builder.errorStrategy == null ? ErrorStrategy.alwaysThrow() : builder.errorStrategy;
-    this.baseRetryDelayStrategy = this.currentRetryDelayStrategy =
-        (builder.retryDelayStrategy == null ? RetryDelayStrategy.defaultStrategy() :
-          builder.retryDelayStrategy);
-    this.baseRetryDelayMillis = builder.retryDelayMillis;
+    // Assemble the retry-strategy registry from the builder. The default is always
+    // registered; additional strategies from the builder are also registered.
+    RetryDelayStrategy defaultStrategy = builder.defaultRetryDelayStrategy != null
+        ? builder.defaultRetryDelayStrategy
+        : RetryDelayStrategy.defaultStrategy();
+    this.defaultRetryDelayStrategy = defaultStrategy;
+    this.registeredStrategiesState = new HashMap<>();
+    // the key is the original strategy, the value is the mutated strategy / state as
+    // operations progress
+    this.registeredStrategiesState.put(defaultStrategy, defaultStrategy);
+    for (RetryDelayStrategy s : builder.additionalRetryDelayStrategies) {
+      this.registeredStrategiesState.put(s, s);
+    }
+    this.currentRetryDelayStrategy = defaultStrategy;
     this.retryDelayResetThresholdMillis = builder.retryDelayResetThresholdMillis;
     this.streamEventData = builder.streamEventData;
     this.expectFields = builder.expectFields;
@@ -176,43 +195,34 @@ public class EventSource implements Closeable {
   }
 
   /**
-   * Returns the current base retry delay.
+   * Activates a previously-registered {@link RetryDelayStrategy}, making it the
+   * strategy used for subsequent reconnect delay computations.
    * <p>
-   * This is initially set by {@link Builder#retryDelay(long, TimeUnit)}, or
-   * {@link #DEFAULT_RETRY_DELAY_MILLIS} if not specified. It can be overriden by the
-   * stream provider if the stream contains a "retry:" line.
+   * The strategy must have been registered on the {@link Builder} via
+   * {@link Builder#retryDelayStrategy(RetryDelayStrategy)}. A null value or a
+   * strategy that was not registered on this EventSource is silently ignored.
    * <p>
-   * The actual retry delay for any given reconnection is computed by applying the
-   * configured {@link RetryDelayStrategy} to this value.
+   * Each registered strategy carries its own backoff progression state.
+   * Activation is a pointer swap and does <em>not</em> reset the newly-activated
+   * strategy's counter; a strategy's state persists across activations.
+   * <p>
+   * This method is safe to call from any thread, but when called from a thread
+   * other than the one reading from this EventSource, the activation may not be
+   * observed for the impending reconnect if the reader thread has already begun
+   * computing its delay. In that case the swap takes effect on the following
+   * reconnect.
    *
-   * @return the base retry delay in milliseconds
-   * @see #getNextRetryDelayMillis()
-   * @since 4.0.0
+   * @param strategy a strategy previously registered on the builder; a null value
+   *   or a strategy not registered on this EventSource is treated as a no-op
+   * @since 5.0.0
    */
-  public long getBaseRetryDelayMillis() {
-    return baseRetryDelayMillis;
+  public void activateRetryDelayStrategy(RetryDelayStrategy strategy) {
+    if (strategy == null || !registeredStrategiesState.containsKey(strategy)) {
+      return;
+    }
+    currentRetryDelayStrategy = strategy;
   }
-  
-  /**
-   * Returns the retry delay that will be used for the next reconnection, if the
-   * stream has failed.
-   * <p>
-   * If you have just received a {@link StreamException} or {@link FaultEvent}, this
-   * value tells you how long EventSource will sleep before reconnecting, if you tell
-   * it to reconnect by calling {@link #start()} or by trying to read another event.
-   * The value is computed by applying the configured {@link RetryDelayStrategy} to
-   * the current value of {@link #getBaseRetryDelayMillis()}.
-   * <p>
-   * At any other time, the value is undefined.
-   *
-   * @return the next retry delay in milliseconds
-   * @see #getBaseRetryDelayMillis()
-   * @since 4.0.0
-   */
-  public long getNextRetryDelayMillis() {
-    return nextReconnectDelayMillis;
-  }
-  
+
   /**
    * Attempts to start the stream if it is not already active.
    * <p>
@@ -228,8 +238,8 @@ public class EventSource implements Closeable {
    * <p>
    * If the stream was previously active and then failed, {@link #start()} will sleep for
    * some amount of time-- the retry delay-- before trying to make the connection. The
-   * retry delay is determined by several factors: see {@link Builder#retryDelay(long, TimeUnit)},
-   * {@link Builder#retryDelayStrategy(RetryDelayStrategy)}, and
+   * retry delay is determined by the configured
+   * {@link Builder#retryDelayStrategy(RetryDelayStrategy)} and
    * {@link Builder#retryDelayResetThreshold(long, TimeUnit)}.
    * @throws StreamException
    * <p>
@@ -253,51 +263,54 @@ public class EventSource implements Closeable {
 
     while (true) {
       StreamException exception = null;
-      
-      if (nextReconnectDelayMillis > 0) {
-        long delayNow = disconnectedTime == 0 ? nextReconnectDelayMillis :
-          (nextReconnectDelayMillis - (System.currentTimeMillis() - disconnectedTime));
-        if (delayNow > 0) {
-          logger.info("Waiting {} milliseconds before reconnecting", delayNow);
-          try {
-            synchronized (sleepNotifier) {
-              if (!deliberatelyClosedConnection) {
-                sleepNotifier.wait(delayNow);
-              }
-              // If interrupt(), stop(), or close() is called while we're waiting, we will
-              // trigger an early exit from this wait by calling sleepNotifier.notify().
+
+      // Compute the reconnect delay just before sleep (rather than eagerly at
+      // fault time). Any strategy activation or wire retry hint received in
+      // the window between fault delivery and reconnect is honored on this
+      // reconnect, not the next one.
+      long reconnectDelayMillis = disconnectedTime != 0 ? computeReconnectDelay() : 0;
+      if (reconnectDelayMillis > 0) {
+        logger.info("Waiting {} milliseconds before reconnecting", reconnectDelayMillis);
+        try {
+          synchronized (sleepNotifier) {
+            // If interrupt(), stop(), or close() is called while we're waiting, we will
+            // trigger an early exit from this wait by calling sleepNotifier.notify().
+            if (!deliberatelyClosedConnection) {
+              sleepNotifier.wait(reconnectDelayMillis);
             }
-          } catch (InterruptedException e) {
-            // Thread.interrupt() should also have the effect of making us stop waiting
-            logger.debug("EventSource thread was interrupted during start()");
-            deliberatelyClosedConnection = true;
-            Thread.interrupted(); // clear interrupted state
           }
-          // Check if deliberatelyClosedConnection might have been set during that wait
-          if (deliberatelyClosedConnection) {
-            exception = new StreamClosedByCallerException();
-          }
+        } catch (InterruptedException e) {
+          // Thread.interrupt() should also have the effect of making us stop waiting
+          logger.debug("EventSource thread was interrupted during start()");
+          deliberatelyClosedConnection = true;
+          Thread.interrupted(); // clear interrupted state
+        }
+        // Check if deliberatelyClosedConnection might have been set during that wait.
+        // If so, the sleep was aborted by interrupt() -- we've observed it, so clear the
+        // flag so the next retry iteration is free to proceed to the connect attempt.
+        if (deliberatelyClosedConnection) {
+          exception = new StreamClosedByCallerException();
+          deliberatelyClosedConnection = false;
         }
       }
-      
+
       ConnectStrategy.Client.Result clientResult = null;
-      
+
       if (exception == null) {
         readyState.set(ReadyState.CONNECTING);
-        
+
         connectedTime = 0;
         deliberatelyClosedConnection = calledStop = false;
-        
+
         try {
           clientResult = client.connect(lastEventId);
         } catch (StreamException e) {
           exception = e;
         }
       }
-      
+
       if (exception != null) {
         disconnectedTime = System.currentTimeMillis();
-        computeReconnectDelay();
         if (applyErrorStrategy(exception) == ErrorStrategy.Action.CONTINUE) {
           // The ErrorStrategy told us to CONTINUE rather than throwing an exception.
           if (canReturnFaultEvent) {
@@ -316,8 +329,8 @@ public class EventSource implements Closeable {
         // The ErrorStrategy told us to THROW rather than CONTINUE.
         throw exception;
       }
-      
-      
+
+
       connectionCloser.set(clientResult.getCloser());
       origin = clientResult.getOrigin() == null ? client.getOrigin() : clientResult.getOrigin();
       connectedTime = System.currentTimeMillis();
@@ -605,9 +618,14 @@ public class EventSource implements Closeable {
         StreamEvent event = eventParser.nextEvent();
         if (event instanceof SetRetryDelayEvent) {
           // SetRetryDelayEvent means the stream contained a "retry:" line. We don't
-          // surface this to the caller, we just apply the new delay and move on.
-          baseRetryDelayMillis = ((SetRetryDelayEvent)event).getRetryMillis();
-          resetRetryDelayStrategy();
+          // surface this to the caller, we just apply the new base and move on.
+          // The new base is sticky across any subsequent activation via
+          // serverDirectedInitialDelayMillis. Clamp against MAX_SERVER_DIRECTED_
+          // RETRY_DELAY_MILLIS to protect against misbehaving server issues.
+          serverDirectedInitialDelayMillis = Math.min(
+              ((SetRetryDelayEvent)event).getRetryMillis(),
+              MAX_SERVER_DIRECTED_RETRY_DELAY_MILLIS);
+          resetAllRegisteredStrategyState();
           continue;
         }
         if (event instanceof MessageEvent) {
@@ -629,7 +647,6 @@ public class EventSource implements Closeable {
       disconnectedTime = System.currentTimeMillis();
       closeCurrentStream(false, false);
       eventParser = null;
-      computeReconnectDelay();
       if (applyErrorStrategy(e) == ErrorStrategy.Action.CONTINUE) {
         // At this point we're handling errors from reading the stream (not initial connection),
         // so we never have HTTP response headers available (headers is always null)
@@ -637,11 +654,6 @@ public class EventSource implements Closeable {
       }
       throw e;
     }
-  }
-  
-  private void resetRetryDelayStrategy() {
-    logger.debug("Resetting retry delay strategy to initial state");
-    currentRetryDelayStrategy = baseRetryDelayStrategy;
   }
 
   private ErrorStrategy.Action applyErrorStrategy(StreamException e) {
@@ -651,19 +663,46 @@ public class EventSource implements Closeable {
     }
     return errorStrategyResult.getAction();
   }
-  
-  private void computeReconnectDelay() {
+
+  // Called just before sleeping at the top of tryStart()'s retry loop. Returns
+  // the delay for the impending reconnect and advances the active strategy's
+  // state via getNext() for the next fault.
+  private long computeReconnectDelay() {
     if (retryDelayResetThresholdMillis > 0 && connectedTime != 0) {
-      long connectionDurationMillis = System.currentTimeMillis() - connectedTime;
+      long connectionDurationMillis = disconnectedTime - connectedTime;
       if (connectionDurationMillis >= retryDelayResetThresholdMillis) {
-        resetRetryDelayStrategy();
+        // Healthy-op reset: the connection lasted long enough that we consider
+        // ourselves back to a "fresh" state. Revert active to the designated
+        // default strategy and zero every registered strategy's counter state.
+        logger.debug("Resetting retry delay strategy to initial state");
+        currentRetryDelayStrategy = defaultRetryDelayStrategy;
+        resetAllRegisteredStrategyState();
       }
     }
-    RetryDelayStrategy.Result result =
-        currentRetryDelayStrategy.apply(baseRetryDelayMillis);
-    nextReconnectDelayMillis = result.getDelayMillis();
-    if (result.getNext() != null) {
-      currentRetryDelayStrategy = result.getNext();
+    RetryDelayStrategy current = currentRetryDelayStrategy;
+    RetryDelayStrategy currentState = registeredStrategiesState.get(current);
+    RetryDelayStrategy next = currentState.getNext();
+    registeredStrategiesState.put(current, next != null ? next : currentState);
+    return currentState.getDelayMillis();
+  }
+
+  // Package-private accessor: returns the current advanced instance for the
+  // currently-active registered strategy. Used by tests to observe the retry state.
+  RetryDelayStrategy currentRetryStrategySnapshot() {
+    return registeredStrategiesState.get(currentRetryDelayStrategy);
+  }
+
+  // Reset each registered strategy's backoff progression. If a wire retry hint has
+  // been received, the reset instance uses the wire base; otherwise it reverts to
+  // the caller's originally-registered instance. This preserves the WHATWG-sticky
+  // wire override across healthy-op resets.
+  private void resetAllRegisteredStrategyState() {
+    for (Map.Entry<RetryDelayStrategy, RetryDelayStrategy> e : registeredStrategiesState.entrySet()) {
+      RetryDelayStrategy fresh = e.getKey();
+      if (serverDirectedInitialDelayMillis != null) {
+        fresh = fresh.withBaseDelayMillis(serverDirectedInitialDelayMillis);
+      }
+      e.setValue(fresh);
     }
   }
 
@@ -708,8 +747,8 @@ public class EventSource implements Closeable {
   public static final class Builder {
     private final ConnectStrategy connectStrategy; // final because it's mandatory, set at constructor time
     private ErrorStrategy errorStrategy;
-    private RetryDelayStrategy retryDelayStrategy;
-    private long retryDelayMillis = DEFAULT_RETRY_DELAY_MILLIS;
+    RetryDelayStrategy defaultRetryDelayStrategy;
+    final List<RetryDelayStrategy> additionalRetryDelayStrategies = new ArrayList<>();
     private long retryDelayResetThresholdMillis = DEFAULT_RETRY_DELAY_RESET_THRESHOLD_MILLIS;
     private String lastEventId;
     private int readBufferSize = DEFAULT_READ_BUFFER_SIZE;
@@ -840,49 +879,37 @@ public class EventSource implements Closeable {
     }
 
     /**
-     * Sets the base delay between connection attempts.
-     * <p>
-     * The actual delay may be slightly less or greater, depending on the strategy specified by
-     * {@link #retryDelayStrategy(RetryDelayStrategy)}. The default behavior is to increase the
-     * delay exponentially from this base value on each attempt, up to a configured maximum,
-     * substracting a random jitter; for more details, see {@link DefaultRetryDelayStrategy}.
-     * <p>
-     * If you set the base delay to zero, the backoff logic will not apply-- multiplying by
-     * zero gives zero every time. Therefore, use a zero delay with caution since it could
-     * cause a reconnect storm during a service interruption.
-     * 
-     * @param retryDelay the base delay, in whatever time unit is specified by {@code timeUnit}
-     * @param timeUnit the time unit, or {@code TimeUnit.MILLISECONDS} if null
-     * @return the builder
-     * @see EventSource#DEFAULT_RETRY_DELAY_MILLIS
-     * @see #retryDelayStrategy(RetryDelayStrategy)
-     * @see #retryDelayResetThreshold(long, TimeUnit)
-     */
-    public Builder retryDelay(long retryDelay, TimeUnit timeUnit) {
-      retryDelayMillis = millisFromTimeUnit(retryDelay, timeUnit);
-      return this;
-    }
-
-    /**
-     * Specifies a strategy for determining the retry delay after an error.
+     * Configures the retry-delay strategies available to the EventSource.
      * <p>
      * Whenever EventSource tries to start a new connection after a stream failure,
-     * it delays for an amount of time that is determined by two parameters: the
-     * base retry delay ({@link #retryDelay(long, TimeUnit)}), and the retry delay
-     * strategy which transforms the base retry delay in some way. The default behavior
-     * is to apply an exponential backoff and jitter. You may instead use a modified
-     * version of {@link DefaultRetryDelayStrategy} to customize the backoff and
-     * jitter, or a custom implementation with any other logic.
-     *  
-     * @param retryDelayStrategy the object that will control retry delays; if null,
-     *   defaults to {@link RetryDelayStrategy#defaultStrategy()}
+     * it delays for an amount of time determined by the active
+     * {@link RetryDelayStrategy}. The default behavior is exponential backoff
+     * with jitter (see {@link RetryDelayStrategy#defaultStrategy()}).
+     * <p>
+     * <b>First call</b> sets the <em>default</em> strategy — the strategy that
+     * is initially active and that the healthy-op reset returns to. If never
+     * called, the default is {@link RetryDelayStrategy#defaultStrategy()}.
+     * <p>
+     * <b>Subsequent calls</b> register additional strategies. These are not
+     * initially active; they become available for runtime activation via
+     * {@link EventSource#activateRetryDelayStrategy(RetryDelayStrategy)}.
+     *
+     * @param retryDelayStrategy the strategy to configure; must not be null
      * @return the builder
-     * @see #retryDelay(long, TimeUnit)
+     * @throws IllegalArgumentException if {@code retryDelayStrategy} is null
      * @see #retryDelayResetThreshold(long, TimeUnit)
+     * @see EventSource#activateRetryDelayStrategy(RetryDelayStrategy)
      * @since 4.0.0
      */
     public Builder retryDelayStrategy(RetryDelayStrategy retryDelayStrategy) {
-      this.retryDelayStrategy = retryDelayStrategy;
+      if (retryDelayStrategy == null) {
+        throw new IllegalArgumentException("retryDelayStrategy must not be null");
+      }
+      if (this.defaultRetryDelayStrategy == null) {
+        this.defaultRetryDelayStrategy = retryDelayStrategy;
+      } else {
+        this.additionalRetryDelayStrategies.add(retryDelayStrategy);
+      }
       return this;
     }
 

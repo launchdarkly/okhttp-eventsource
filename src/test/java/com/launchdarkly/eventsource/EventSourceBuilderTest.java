@@ -82,15 +82,20 @@ public class EventSourceBuilderTest {
   @Test
   public void retryDelayStrategy() {
     try (EventSource es = builder.build()) {
-      assertThat(es.baseRetryDelayStrategy, sameInstance(RetryDelayStrategy.defaultStrategy()));
+      assertThat(es.defaultRetryDelayStrategy, sameInstance(RetryDelayStrategy.defaultStrategy()));
       assertThat(es.currentRetryDelayStrategy, sameInstance(RetryDelayStrategy.defaultStrategy()));
     }
 
     RetryDelayStrategy customStrategy = RetryDelayStrategy.defaultStrategy().backoffMultiplier(3);
     try (EventSource es = builder.retryDelayStrategy(customStrategy).build()) {
-      assertThat(es.baseRetryDelayStrategy, sameInstance(customStrategy));
+      assertThat(es.defaultRetryDelayStrategy, sameInstance(customStrategy));
       assertThat(es.currentRetryDelayStrategy, sameInstance(customStrategy));
     }
+  }
+
+  @Test(expected=IllegalArgumentException.class)
+  public void retryDelayStrategyRejectsNull() {
+    builder.retryDelayStrategy(null);
   }
   
   @Test

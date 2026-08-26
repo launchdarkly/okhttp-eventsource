@@ -10,62 +10,55 @@ package com.launchdarkly.eventsource;
  * generally a best practice to use backoff and jitter, to avoid a reconnect storm
  * during a service interruption.
  * <p>
- * Implementations of this interface should be immutable. To implement strategies where
- * the delay uses different parameters on each subsequent retry (such as exponential
- * backoff), the strategy should return a new instance of its own class in
- * {@link RetryDelayStrategy.Result#getNext()}, rather than modifying the state of the
- * existing instance. This makes it easy for EventSource to reset to the original delay
- * state when appropriate by simply reusing the original instance.
+ * Implementations should be immutable. Each instance represents a single state in the
+ * retry-delay sequence: {@link #getDelayMillis()} returns the delay to use for the
+ * impending retry, and {@link #getNext()} returns the strategy instance to use for
+ * the retry after that. Strategies with a base-delay concept may also implement
+ * {@link #withBaseDelayMillis(long)} to accept server-directed reconnection-time
+ * overrides from the SSE {@code retry:} field.
  *
  * @since 4.0.0
  */
 public abstract class RetryDelayStrategy {
   /**
-   * The return type of {@link RetryDelayStrategy#apply(long)}.
-   */
-  public static class Result {
-    private final long delayMillis;
-    private final RetryDelayStrategy next;
-    
-    /**
-     * Constructs an instance.
-     *
-     * @param delayMillis the computed delay in milliseconds
-     * @param next a {@link RetryDelayStrategy} instance to be used for the next retry;
-     *   null means to use the same instance as last time
-     */
-    public Result(long delayMillis, RetryDelayStrategy next) {
-      this.delayMillis = delayMillis;
-      this.next = next;
-    }
-
-    /**
-     * Returns the computed delay.
-     * @return the delay in milliseconds
-     */
-    public long getDelayMillis() {
-      return delayMillis;
-    }
-
-    /**
-     * Returns the strategy instance to be used for the next retry, or null to use the
-     * same instance as last time.
-     * @return a new instance or null
-     */
-    public RetryDelayStrategy getNext() {
-      return next;
-    }
-  }
-  
-  /**
-   * Applies the strategy to compute the appropriate retry delay.
+   * Returns the retry delay this instance represents, in milliseconds. Pure and
+   * deterministic on a given instance.
    *
-   * @param baseDelayMillis the initial configured base delay as set by
-   *   {@link EventSource.Builder#retryDelay(long, java.util.concurrent.TimeUnit)}
-   * @return the computed delay
+   * @return the delay in milliseconds
+   * @since 5.0.0
    */
-  public abstract Result apply(long baseDelayMillis);
-  
+  public abstract long getDelayMillis();
+
+  /**
+   * Returns the strategy instance to use for the retry after this one. Does not
+   * modify this instance.
+   * <p>
+   * Strategies that never advance (e.g., a constant-delay strategy) return
+   * {@code this}. Strategies with backoff progression return a new instance
+   * carrying the advanced state. Returning {@code null} is treated as
+   * equivalent to returning {@code this}.
+   *
+   * @return the strategy to use next, or {@code null} to reuse this instance
+   * @since 5.0.0
+   */
+  public abstract RetryDelayStrategy getNext();
+
+  /**
+   * Returns a fresh instance of this strategy with its base delay set to the given
+   * value and any backoff progression reset.
+   * <p>
+   * The default implementation returns {@code this}. Strategies without a base-delay
+   * concept opt out of wire-directed base overrides by not implementing this method.
+   *
+   * @param millis the new base delay in milliseconds
+   * @return a fresh instance with the given base, or {@code this} if the strategy
+   *   does not honor base overrides
+   * @since 5.0.0
+   */
+  public RetryDelayStrategy withBaseDelayMillis(long millis) {
+    return this;
+  }
+
   /**
    * Returns the default implementation, configured to use the default backoff and
    * jitter.

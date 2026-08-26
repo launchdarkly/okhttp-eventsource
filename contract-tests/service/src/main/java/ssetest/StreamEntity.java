@@ -3,6 +3,7 @@ package ssetest;
 import com.launchdarkly.eventsource.*;
 import com.launchdarkly.logging.*;
 import java.net.URI;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import okhttp3.*;
@@ -47,7 +48,8 @@ public class StreamEntity {
       .errorStrategy(ErrorStrategy.alwaysContinue())
       .logger(logger.subLogger("stream"));
     if (options.initialDelayMs != null) {
-      eb.retryDelay((long)options.initialDelayMs, null);
+      eb.retryDelayStrategy(RetryDelayStrategy.defaultStrategy()
+          .initialDelay((long)options.initialDelayMs, TimeUnit.MILLISECONDS));
     }
     if (options.lastEventId != null) {
       eb.lastEventId(options.lastEventId);

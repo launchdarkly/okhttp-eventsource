@@ -44,7 +44,8 @@ public class EventSourceReadingTest {
       assertThat(es.getState(), equalTo(ReadyState.RAW));
       assertThat(es.getOrigin(), equalTo(ORIGIN));
       assertThat(es.getLastEventId(), nullValue());
-      assertThat(es.getBaseRetryDelayMillis(), equalTo(EventSource.DEFAULT_RETRY_DELAY_MILLIS));
+      assertThat(((DefaultRetryDelayStrategy) es.defaultRetryDelayStrategy).baseDelayMillis,
+          equalTo(EventSource.DEFAULT_RETRY_DELAY_MILLIS));
     }
   }
   
@@ -59,7 +60,8 @@ public class EventSourceReadingTest {
       assertThat(es.getState(), equalTo(ReadyState.OPEN));
       assertThat(es.getOrigin(), equalTo(ORIGIN));
       assertThat(es.getLastEventId(), nullValue());
-      assertThat(es.getBaseRetryDelayMillis(), equalTo(EventSource.DEFAULT_RETRY_DELAY_MILLIS));
+      assertThat(((DefaultRetryDelayStrategy) es.defaultRetryDelayStrategy).baseDelayMillis,
+          equalTo(EventSource.DEFAULT_RETRY_DELAY_MILLIS));
     }
   }
 
@@ -193,7 +195,7 @@ public class EventSourceReadingTest {
     stream.provideData(body);
 
     try (EventSource es = baseBuilder(mock)
-        .retryDelay(10, null)
+        .retryDelayStrategy(RetryDelayStrategy.defaultStrategy().initialDelay(10, TimeUnit.MILLISECONDS))
         .build()) {
       es.start();
 
@@ -217,14 +219,16 @@ public class EventSourceReadingTest {
   public void initialRetryDelayIsSetFromBuilder() throws Exception {
     MockConnectStrategy mock = new MockConnectStrategy();
 
-    try (EventSource es = baseBuilder(mock).retryDelay(6, TimeUnit.SECONDS).build()) {
-      assertEquals(6000, es.getBaseRetryDelayMillis());
+    try (EventSource es = baseBuilder(mock)
+        .retryDelayStrategy(RetryDelayStrategy.defaultStrategy().initialDelay(6, TimeUnit.SECONDS))
+        .build()) {
+      assertEquals(6000, ((DefaultRetryDelayStrategy) es.defaultRetryDelayStrategy).baseDelayMillis);
     }
   }
 
   @Test
   public void retryDelayIsUpdatedFromEvent() throws Exception {
-    String eventData = "some-data";    
+    String eventData = "some-data";
     String body = "retry: 300\n" + "\ndata: " + eventData + "\n\n";
 
     MockConnectStrategy mock = new MockConnectStrategy();
@@ -233,7 +237,7 @@ public class EventSourceReadingTest {
     stream.provideData(body);
 
     try (EventSource es = baseBuilder(mock)
-        .retryDelay(10, null)
+        .retryDelayStrategy(RetryDelayStrategy.defaultStrategy().initialDelay(10, TimeUnit.MILLISECONDS))
         .build()) {
       es.start();
 
@@ -242,8 +246,36 @@ public class EventSourceReadingTest {
 
       assertThat(es.readAnyEvent(), equalTo(
           new MessageEvent("message", eventData, null, ORIGIN)));
-      
-      assertEquals(300, es.getBaseRetryDelayMillis());
+
+      // Wire retry hint updates the current active strategy's snapshot with the new base.
+      assertEquals(300, ((DefaultRetryDelayStrategy) es.currentRetryStrategySnapshot()).baseDelayMillis);
+    }
+  }
+
+  @Test
+  public void retryDelayFromEventIsClampedToMax() throws Exception {
+    // Server sends a wire retry hint above MAX_SERVER_DIRECTED_RETRY_DELAY_MILLIS;
+    // the client applies the clamped value, not the raw hint. Use a strategy
+    // whose maxDelay comfortably exceeds MAX_SERVER_DIRECTED_RETRY_DELAY_MILLIS
+    // so the wire-side clamp is the load-bearing bound (not the strategy max).
+    long hugeHint = EventSource.MAX_SERVER_DIRECTED_RETRY_DELAY_MILLIS + 1_000_000L;
+    String body = "retry: " + hugeHint + "\n\ndata: x\n\n";
+
+    MockConnectStrategy mock = new MockConnectStrategy();
+    PipedStreamRequestHandler stream = respondWithStream();
+    mock.configureRequests(stream);
+    stream.provideData(body);
+
+    try (EventSource es = baseBuilder(mock)
+        .retryDelayStrategy(RetryDelayStrategy.defaultStrategy()
+            .initialDelay(10, TimeUnit.MILLISECONDS)
+            .maxDelay(24, TimeUnit.HOURS))
+        .build()) {
+      es.start();
+      assertThat(es.readAnyEvent(), equalTo(
+          new MessageEvent("message", "x", null, ORIGIN)));
+      assertEquals(EventSource.MAX_SERVER_DIRECTED_RETRY_DELAY_MILLIS,
+          ((DefaultRetryDelayStrategy) es.currentRetryStrategySnapshot()).baseDelayMillis);
     }
   }
   
@@ -371,7 +403,7 @@ public class EventSourceReadingTest {
       new Thread(() -> {
         es.set(baseBuilder(mock)
             .errorStrategy(ErrorStrategy.alwaysContinue())
-            .retryDelay(1, TimeUnit.MILLISECONDS)
+            .retryDelayStrategy(RetryDelayStrategy.defaultStrategy().initialDelay(1, TimeUnit.MILLISECONDS))
             .build());
         for (MessageEvent m: es.get().messages()) {
           queue.add(m);
@@ -418,7 +450,7 @@ public class EventSourceReadingTest {
       new Thread(() -> {
         es.set(baseBuilder(mock)
             .errorStrategy(ErrorStrategy.alwaysContinue())
-            .retryDelay(1, TimeUnit.MILLISECONDS)
+            .retryDelayStrategy(RetryDelayStrategy.defaultStrategy().initialDelay(1, TimeUnit.MILLISECONDS))
             .build());
         for (StreamEvent e: es.get().anyEvents()) {
           queue.add(e);

@@ -339,7 +339,7 @@ public class EventSource implements Closeable {
       ResponseHeaders headers = clientResult.getHeaders();
       eventParser = new EventParser(
           clientResult.getInputStream(),
-          clientResult.getOrigin(),
+          origin,
           readBufferSize,
           streamEventData,
           expectFields,
@@ -1015,7 +1015,7 @@ public class EventSource implements Closeable {
      * <li> The SSE protocol specifies that an event should be processed only if it is terminated by a blank line, but
      * in this mode the handler will receive the event as soon as a {@code data:} field appears-- so, if the stream
      * happens to cut off abnormally without a trailing blank line, technically you will be receiving an incomplete
-     * event that should have been ignored. You will know this has happened ifbecause reading from the Reader throws
+     * event that should have been ignored. You will know this has happened if reading from the Reader throws
      * a {@link StreamClosedWithIncompleteMessageException}.</li>
      * </ul>  
      * 

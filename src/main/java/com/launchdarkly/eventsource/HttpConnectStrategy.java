@@ -71,7 +71,7 @@ public class HttpConnectStrategy extends ConnectStrategy {
    */
   public static final long DEFAULT_WRITE_TIMEOUT_MILLIS = 5000;
   /**
-   * The default value for {@link #readTimeout(long, TimeUnit)}: 5 minutes.
+   * The default value for {@link #readTimeout(long, TimeUnit)}: 5 seconds.
    */
   public static final long DEFAULT_READ_TIMEOUT_MILLIS = 5000;
   

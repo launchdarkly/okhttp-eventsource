@@ -4,8 +4,11 @@ package com.launchdarkly.eventsource;
  * An exception indicating that the stream stopped because the server closed the
  * connection.
  * <p>
- * This exception is thrown when the server closes the connection. In streaming data mode,
- * an incomplete message instead causes a {@link StreamClosedWithIncompleteMessageException}.
+ * This exception is thrown from {@link EventSource#readMessage()} and {@link EventSource#readAnyEvent()}
+ * when the server closes the connection, whether or not the last message was complete. In streaming
+ * data mode, if the connection ends while the application is reading a message's data from the
+ * {@code Reader}, that {@code Reader} will throw a {@link StreamClosedWithIncompleteMessageException}
+ * (an {@link java.io.IOException}) instead.
  * <p>
  * See {@link StreamException} for more about EventSource's exception behavior.
  *

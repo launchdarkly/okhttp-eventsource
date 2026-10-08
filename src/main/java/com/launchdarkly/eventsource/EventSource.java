@@ -332,14 +332,15 @@ public class EventSource implements Closeable {
 
 
       connectionCloser.set(clientResult.getCloser());
-      origin = clientResult.getOrigin() == null ? client.getOrigin() : clientResult.getOrigin();
+      URI resolvedOrigin = clientResult.getOrigin() == null ? client.getOrigin() : clientResult.getOrigin();
+      origin = resolvedOrigin;
       connectedTime = System.currentTimeMillis();
       logger.debug("Connected to SSE stream");
 
       ResponseHeaders headers = clientResult.getHeaders();
       eventParser = new EventParser(
           clientResult.getInputStream(),
-          origin,
+          resolvedOrigin,
           readBufferSize,
           streamEventData,
           expectFields,

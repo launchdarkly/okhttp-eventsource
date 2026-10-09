@@ -5,6 +5,7 @@ import com.launchdarkly.logging.LogValues;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.URL;
 import java.util.ArrayList;
@@ -96,6 +97,7 @@ public class EventSource implements Closeable {
   // The following mutable fields are not volatile because they should only be
   // accessed from the thread that is reading from EventSource.
   private EventParser eventParser;
+  private InputStream eventParserInputStream;
   ErrorStrategy currentErrorStrategy;
   private long connectedTime;
   private long disconnectedTime;
@@ -337,6 +339,7 @@ public class EventSource implements Closeable {
       logger.debug("Connected to SSE stream");
 
       ResponseHeaders headers = clientResult.getHeaders();
+      eventParserInputStream = clientResult.getInputStream();
       eventParser = new EventParser(
           clientResult.getInputStream(),
           clientResult.getOrigin(),
@@ -646,7 +649,7 @@ public class EventSource implements Closeable {
       }
       disconnectedTime = System.currentTimeMillis();
       closeCurrentStream(false, false);
-      eventParser = null;
+      discardEventParser();
       if (applyErrorStrategy(e) == ErrorStrategy.Action.CONTINUE) {
         // At this point we're handling errors from reading the stream (not initial connection),
         // so we never have HTTP response headers available (headers is always null)
@@ -729,7 +732,6 @@ public class EventSource implements Closeable {
         }
       }
       if (oldReadingThread == Thread.currentThread()) {
-        eventParser = null;
         readyState.compareAndSet(ReadyState.OPEN, ReadyState.CLOSED);
         readyState.compareAndSet(ReadyState.CONNECTING, ReadyState.CLOSED);
         // If the current thread is not the reading thread, these fields will be updated the
@@ -738,7 +740,28 @@ public class EventSource implements Closeable {
       
       sleepNotifier.notify(); // in case we're sleeping in a reconnect delay, wake us up
     }
+    if (oldReadingThread == Thread.currentThread()) {
+      discardEventParser();
+    }
     return true;
+  }
+
+  // Drops the parser for the current stream and closes its input stream. Call this only on
+  // the reading thread, because the input stream is not safe to close while another thread
+  // reads from it. Call it only after the connection closer has run. Closing the input
+  // stream releases the HTTP response. Cancelling the request does not release it, and an
+  // HTTP/2 connection stays in use until its response is released.
+  private void discardEventParser() {
+    eventParser = null;
+    InputStream inputStream = eventParserInputStream;
+    eventParserInputStream = null;
+    if (inputStream != null) {
+      try {
+        inputStream.close();
+      } catch (IOException e) {
+        logger.debug("Unexpected error when closing stream: {}", LogValues.exceptionSummary(e));
+      }
+    }
   }
   
   /**

@@ -43,12 +43,19 @@ public class EventSourceStreamReleaseTest {
     private final InputStream readStream;
 
     TrackedStreamHandler(String data) throws IOException {
+      this(data, false);
+    }
+
+    TrackedStreamHandler(String data, boolean failOnClose) throws IOException {
       readStream = new FilterInputStream(new PipedInputStream(writeStream)) {
         @Override
         public void close() throws IOException {
           actions.add(STREAM_CLOSED);
           streamClosingThread = Thread.currentThread();
           super.close();
+          if (failOnClose) {
+            throw new IOException("deliberate error");
+          }
         }
       };
       writeStream.write(data.getBytes());
@@ -124,6 +131,18 @@ public class EventSourceStreamReleaseTest {
       assertThat(es.readAnyEvent(), equalTo(new FaultEvent(new StreamClosedByCallerException())));
       assertThat(handler.actions, contains(CLOSER_RAN, STREAM_CLOSED));
       assertThat(handler.streamClosingThread, sameInstance(Thread.currentThread()));
+    }
+  }
+
+  @Test
+  public void errorWhenClosingInputStreamDoesNotStopReconnect() throws Exception {
+    TrackedStreamHandler handler = new TrackedStreamHandler(MESSAGE, true);
+    try (EventSource es = startEventSource(handler)) {
+      es.interrupt();
+
+      assertThat(handler.actions, contains(CLOSER_RAN, STREAM_CLOSED));
+      assertThat(es.readAnyEvent(), equalTo(new StartedEvent()));
+      assertThat(es.readAnyEvent(), equalTo(new MessageEvent("message", "first", null, ORIGIN)));
     }
   }
 

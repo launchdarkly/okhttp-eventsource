@@ -97,6 +97,9 @@ public abstract class ConnectStrategy {
       
       /**
        * The input stream that {@link EventSource} should read from.
+       * <p>
+       * When {@link EventSource} stops using the stream, it calls the {@link #getCloser() closer}
+       * and then closes this stream on the thread that reads from it.
        *
        * @return the input stream (must not be null)
        */

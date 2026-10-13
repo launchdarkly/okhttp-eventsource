@@ -2,6 +2,13 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [5.0.1](https://github.com/launchdarkly/okhttp-eventsource/compare/5.0.0...5.0.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* Close the response body when a stream stops ([#114](https://github.com/launchdarkly/okhttp-eventsource/issues/114)) ([0cf16fe](https://github.com/launchdarkly/okhttp-eventsource/commit/0cf16fe3ab91bddc02ec767be4557276d11ada89))
+
 ## [5.0.0](https://github.com/launchdarkly/okhttp-eventsource/compare/4.3.0...5.0.0) (2026-08-28)
 
 

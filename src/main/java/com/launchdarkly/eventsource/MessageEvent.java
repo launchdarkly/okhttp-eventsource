@@ -11,7 +11,7 @@ import java.util.Objects;
  * <p>
  * The properties of a message are defined by the SSE specification. Every message
  * has an event name set by the "event:" field ({@link #DEFAULT_EVENT_NAME} if not
- * specified), a data string set by "date:" fields, an optional last event ID string
+ * specified), a data string set by "data:" fields, an optional last event ID string
  * (set by the "id:" field and defaulting to the same value until it is set again),
  * and an origin URI (always the same stream URI).
  */

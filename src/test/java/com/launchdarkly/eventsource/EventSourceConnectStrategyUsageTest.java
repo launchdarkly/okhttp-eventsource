@@ -12,6 +12,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
@@ -224,6 +225,42 @@ public class EventSourceConnectStrategyUsageTest {
       es.start();
       
       assertThat(es.getOrigin(), Matchers.equalTo(origin2));
+    }
+  }
+
+  @Test
+  public void messageOriginFallsBackToClientOrigin() throws Exception {
+    assertMessageOriginFallsBackToClientOrigin(false);
+  }
+
+  @Test
+  public void streamingMessageOriginFallsBackToClientOrigin() throws Exception {
+    assertMessageOriginFallsBackToClientOrigin(true);
+  }
+
+  private void assertMessageOriginFallsBackToClientOrigin(boolean streaming) throws Exception {
+    URI expectedOrigin = URI.create("http://client-origin.example");
+    ConnectStrategy cs = new ConnectStrategy() {
+      @Override
+      public Client createClient(LDLogger logger) {
+        return new ClientBaseImpl() {
+          @Override
+          public URI getOrigin() {
+            return expectedOrigin;
+          }
+
+          @Override
+          public Result connect(String lastEventId) throws StreamException {
+            return new Result(new ByteArrayInputStream(
+                "data: hello\n\n".getBytes(StandardCharsets.UTF_8)), null, null);
+          }
+        };
+      }
+    };
+    try (EventSource es = new EventSource.Builder(cs).streamEventData(streaming).build()) {
+      es.start();
+      MessageEvent message = es.readMessage();
+      assertThat(message.getOrigin(), is(expectedOrigin));
     }
   }
   

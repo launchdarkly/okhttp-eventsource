@@ -2,6 +2,13 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [5.0.2](https://github.com/launchdarkly/okhttp-eventsource/compare/5.0.1...5.0.2) (2026-10-27)
+
+
+### Bug Fixes
+
+* preserve fallback origin in message events ([#112](https://github.com/launchdarkly/okhttp-eventsource/issues/112)) ([46d5d71](https://github.com/launchdarkly/okhttp-eventsource/commit/46d5d71fb564b2a7724286a5cdabd23d4705e1b3))
+
 ## [5.0.1](https://github.com/launchdarkly/okhttp-eventsource/compare/5.0.0...5.0.1) (2026-10-13)
 
 

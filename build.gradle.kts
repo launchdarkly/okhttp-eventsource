@@ -18,22 +18,23 @@ plugins {
     signing
     `maven-publish`
     idea
-    id("org.jetbrains.kotlin.jvm") version "1.6.10"
+    id("org.jetbrains.kotlin.jvm") version "2.1.21"
     id("io.github.gradle-nexus.publish-plugin") version "1.3.0" apply false
 }
 
 // Note about org.jetbrains.kotlin.jvm in the plugins block:
-// Normally we wouldn't have to explicitly list the Kotlin plugin here since we're
-// only building Java code. However-- possibly because OkHttp uses Kotlin-- if we
-// don't list the plugin here, then we're unable to use the "api" configuration in
-// dependencies even though that would normally be made available by the combination
-// of "java" and "java-library". See:
-// https://discuss.gradle.org/t/does-the-java-library-plugin-actually-do-anything-gradle-cant-do-natively/34361/5
-// We have to make sure the version shown here matches the version that is used by
-// OkHttp-- otherwise we will end up with an extra Kotlin runtime dependency in our
-// own pom.
-// This does not appear to be an issue with other Java projects such as
-// launchdarkly-java-sdk-common; there, we can just use "java" and "java-library".
+// This project is pure Java, but the Kotlin plugin must stay applied. With it applied,
+// maven-publish writes the resolved "okhttp-jvm" coordinates into our pom instead of
+// "okhttp". That matters because OkHttp 5.x publishes "okhttp" itself as an empty
+// Kotlin Multiplatform stub whose pom does not reference okhttp-jvm; only Gradle
+// consumers (via module metadata) can resolve it to the real JVM artifact. A pom of
+// ours pointing at "okhttp" would therefore give Maven-only consumers no OkHttp
+// classes at all. (Our Gradle module metadata still declares "okhttp", which Gradle
+// consumers resolve normally.)
+// Keep this plugin version matched to the Kotlin version OkHttp is built with (see
+// the kotlin-stdlib dependency in okhttp-jvm's pom for the OkHttp version above).
+// kotlin.stdlib.default.dependency=false in gradle.properties prevents the plugin
+// from adding kotlin-stdlib to our own pom.
 
 repositories {
     mavenLocal()
@@ -63,7 +64,7 @@ java {
 
 object Versions {
     const val launchdarklyLogging = "1.1.1"
-    const val okhttp = "4.12.0"
+    const val okhttp = "5.5.1"
 }
 
 dependencies {

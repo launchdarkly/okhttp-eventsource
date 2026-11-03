@@ -2,6 +2,17 @@
 
 All notable changes to the LaunchDarkly EventSource implementation for Java will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [6.0.0](https://github.com/launchdarkly/okhttp-eventsource/compare/5.0.2...6.0.0) (2026-11-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* update OkHttp to 5.5.1 ([#117](https://github.com/launchdarkly/okhttp-eventsource/issues/117))
+
+### Features
+
+* update OkHttp to 5.5.1 ([#117](https://github.com/launchdarkly/okhttp-eventsource/issues/117)) ([6cc4a9a](https://github.com/launchdarkly/okhttp-eventsource/commit/6cc4a9aee5a35affebafa705ca90c501bb36f0d1))
+
 ## [5.0.2](https://github.com/launchdarkly/okhttp-eventsource/compare/5.0.1...5.0.2) (2026-10-27)
 
 

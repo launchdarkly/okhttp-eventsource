@@ -45,7 +45,9 @@ jobs:
 
       # After junit/coverage artifacts: contract test failures must not skip uploads above.
       - name: Contract tests
-        run: make contract-tests
+        uses: ./.github/actions/contract-tests
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   windows:
     runs-on: windows-latest

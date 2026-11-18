@@ -20,7 +20,7 @@ jobs:
         java-version: ["8", "11", "17"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Shared CI
         uses: ./.github/actions/ci
@@ -33,12 +33,12 @@ jobs:
             mkdir -p ~/junit/;
             find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/junit/ \;
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.java-version }} junit results
           path: ~/junit
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.java-version }} code coverage
           path: ./coverage
@@ -62,7 +62,7 @@ jobs:
         java-version: ["11.0.2.01", "17.0.1"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: install OpenJDK
         run: choco install openjdk --version ${{ matrix.java-version }}
@@ -77,7 +77,7 @@ jobs:
             mkdir .\junit
             cp build/test-results/test/*.xml junit
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.java-version }} junit results
           path: .\junit

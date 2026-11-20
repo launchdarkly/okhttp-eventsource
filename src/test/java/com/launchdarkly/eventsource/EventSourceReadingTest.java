@@ -98,6 +98,32 @@ public class EventSourceReadingTest {
   }
 
   @Test
+  public void stateStaysShutdownWhenClosedWhileAnotherThreadIsReading() throws Exception {
+    MockConnectStrategy mock = new MockConnectStrategy();
+    mock.configureRequests(respondWithStream());
+
+    try (EventSource es = baseBuilder(mock).build()) {
+      es.start();
+      BlockingQueue<Object> result = new LinkedBlockingQueue<>();
+      Thread reader = new Thread(() -> {
+        try {
+          result.add(es.readAnyEvent());
+        } catch (StreamException e) {
+          result.add(e);
+        }
+      });
+      reader.start();
+      mock.expectConnection();
+      Thread.sleep(50); // let the reader block on the stream
+
+      es.close();
+
+      assertThat(result.poll(5, TimeUnit.SECONDS) instanceof StreamClosedByCallerException, is(true));
+      assertThat(es.getState(), equalTo(ReadyState.SHUTDOWN));
+    }
+  }
+
+  @Test
   public void startOnAlreadyStartedStreamHasNoEffect() throws Exception {
     MockConnectStrategy mock = new MockConnectStrategy();
     mock.configureRequests(respondWithStream());

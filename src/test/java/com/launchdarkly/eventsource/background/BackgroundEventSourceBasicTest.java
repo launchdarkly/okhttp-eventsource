@@ -84,4 +84,79 @@ public class BackgroundEventSourceBasicTest {
       assertThat(testHandler.awaitLogItem(), equalTo(LogItem.event("message", "data2")));
     }
   }
+
+  @Test
+  public void interruptReconnectsInsteadOfShuttingDown() {
+    TestHandler testHandler = new TestHandler(testLogger.getLogger());
+    mockConnect.configureRequests(
+        respondWithDataAndThenStayOpen("data: data1\n\n"),
+        respondWithDataAndThenStayOpen("data: data2\n\n")
+        );
+
+    try (BackgroundEventSource bes = new BackgroundEventSource.Builder(
+        testHandler,
+        baseEventSourceBuilder()
+        ).build()) {
+      bes.start();
+
+      assertThat(testHandler.awaitLogItem(), equalTo(LogItem.opened()));
+      assertThat(testHandler.awaitLogItem(), equalTo(LogItem.event("message", "data1")));
+
+      bes.getEventSource().interrupt();
+
+      // the handler is told the connection closed, but not given an error, and the stream reconnects
+      assertThat(testHandler.awaitLogItem(), equalTo(LogItem.closed()));
+      assertThat(testHandler.awaitLogItem(), equalTo(LogItem.opened()));
+      assertThat(testHandler.awaitLogItem(), equalTo(LogItem.event("message", "data2")));
+    }
+  }
+
+  @Test
+  public void stopOnTheEventSourceAlsoReconnects() {
+    TestHandler testHandler = new TestHandler(testLogger.getLogger());
+    mockConnect.configureRequests(
+        respondWithDataAndThenStayOpen("data: data1\n\n"),
+        respondWithDataAndThenStayOpen("data: data2\n\n")
+        );
+
+    try (BackgroundEventSource bes = new BackgroundEventSource.Builder(
+        testHandler,
+        baseEventSourceBuilder()
+        ).build()) {
+      bes.start();
+
+      assertThat(testHandler.awaitLogItem(), equalTo(LogItem.opened()));
+      assertThat(testHandler.awaitLogItem(), equalTo(LogItem.event("message", "data1")));
+
+      // BackgroundEventSource always reads the next event, which starts the stream again
+      bes.getEventSource().stop();
+
+      assertThat(testHandler.awaitLogItem(), equalTo(LogItem.closed()));
+      assertThat(testHandler.awaitLogItem(), equalTo(LogItem.opened()));
+      assertThat(testHandler.awaitLogItem(), equalTo(LogItem.event("message", "data2")));
+    }
+  }
+
+  @Test
+  public void closingTheEventSourceStillShutsDown() {
+    TestHandler testHandler = new TestHandler(testLogger.getLogger());
+    mockConnect.configureRequests(
+        respondWithDataAndThenStayOpen("data: data1\n\n"),
+        respondWithDataAndThenStayOpen("data: data2\n\n")
+        );
+
+    try (BackgroundEventSource bes = new BackgroundEventSource.Builder(
+        testHandler,
+        baseEventSourceBuilder()
+        ).build()) {
+      bes.start();
+
+      assertThat(testHandler.awaitLogItem(), equalTo(LogItem.opened()));
+      assertThat(testHandler.awaitLogItem(), equalTo(LogItem.event("message", "data1")));
+
+      bes.getEventSource().close();
+
+      testHandler.assertNoMoreLogItems();
+    }
+  }
 }

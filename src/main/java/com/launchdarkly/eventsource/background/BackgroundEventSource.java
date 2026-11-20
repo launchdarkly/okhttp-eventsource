@@ -4,6 +4,7 @@ import com.launchdarkly.eventsource.CommentEvent;
 import com.launchdarkly.eventsource.EventSource;
 import com.launchdarkly.eventsource.FaultEvent;
 import com.launchdarkly.eventsource.MessageEvent;
+import com.launchdarkly.eventsource.ReadyState;
 import com.launchdarkly.eventsource.StartedEvent;
 import com.launchdarkly.eventsource.StreamClosedByCallerException;
 import com.launchdarkly.eventsource.StreamEvent;
@@ -25,6 +26,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * A wrapper for {@link EventSource} that reads the stream on a worker thread,
  * pushing events to a handler that the caller provides.
+ * <p>
+ * To make the stream reconnect, call {@code getEventSource().interrupt()}. The handler's
+ * {@link BackgroundEventHandler#onClosed()} is called, and then the stream starts again.
+ * {@link EventSource#stop()} has the same effect here, because BackgroundEventSource always
+ * goes on to read the next event. To shut down, call {@link #close()}.
  * <p>
  * A BackgroundEventSource instance manages two worker threads: one to start the
  * stream and request events from it, and another to call handler methods. These are
@@ -199,7 +205,14 @@ public class BackgroundEventSource implements Closeable {
     if (event instanceof FaultEvent) {
       StreamException e = ((FaultEvent)event).getCause();
       if (e instanceof StreamClosedByCallerException) {
-        return false; // don't bother dispatching anything, just quit
+        if (closed.get() || eventSource.getState() == ReadyState.SHUTDOWN) {
+          return false; // we or the EventSource were closed, so just quit
+        }
+        // The caller interrupted or stopped the stream, for instance to force a reconnect.
+        // Tell the handler that the connection closed (not as an error), then keep reading,
+        // which starts the stream again.
+        dispatchEvent(event);
+        return true;
       }
       dispatchEvent(event);
       if (connectionErrorHandler != null) {

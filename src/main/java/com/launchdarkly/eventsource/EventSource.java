@@ -641,7 +641,8 @@ public class EventSource implements Closeable {
         return event;
       }
     } catch (StreamException e) {
-      readyState.set(ReadyState.CLOSED);
+      // close() sets SHUTDOWN before it closes the stream; don't overwrite that
+      readyState.updateAndGet(state -> state == SHUTDOWN ? SHUTDOWN : ReadyState.CLOSED);
       if (deliberatelyClosedConnection) {
         // If the stream was explicitly closed from another thread, that'll likely show up as
         // an I/O error, but we don't want to report it as one.

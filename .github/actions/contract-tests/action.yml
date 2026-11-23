@@ -17,7 +17,7 @@ runs:
       run: make start-contract-test-service-bg
 
     - name: Run contract tests
-      uses: launchdarkly/gh-actions/actions/contract-tests@contract-tests-v1
+      uses: launchdarkly/gh-actions/actions/contract-tests@contract-tests/v1
       with:
         repo: sse-contract-tests
         branch: main
